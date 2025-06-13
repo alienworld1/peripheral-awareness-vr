@@ -245,11 +245,13 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
             yield break;
         }
         StartCoroutine(ShowLettersOneByOne());
-    }
-
-    IEnumerator ShowLettersOneByOne()
+    }    IEnumerator ShowLettersOneByOne()
     {
         isDisplaying = true;
+        
+        // Notify voice input that letters are now ready
+        NotifyVoiceInputReady();
+        
         while (isDisplaying)
         {
             foreach (var letter in instantiatedLetters)
@@ -386,5 +388,20 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
     {
         yield return new WaitForSeconds(2f);
         feedbackText.SetActive(false);
+    }
+
+    public bool IsDisplayingLetters()
+    {
+        return isDisplaying && instantiatedLetters.Count > 0;
+    }
+
+    // Method to notify voice input when letters start displaying
+    public void NotifyVoiceInputReady()
+    {
+        if (voiceInput != null)
+        {
+            Debug.Log("📢 Notifying voice input that letters are ready");
+            voiceInput.OnLettersReady();
+        }
     }
 }

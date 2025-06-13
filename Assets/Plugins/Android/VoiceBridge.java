@@ -23,18 +23,22 @@ public class VoiceBridge {
         this.gameObjectName = gameObjectName;
         initializeSpeechRecognizer();
     }
-    
-    private void initializeSpeechRecognizer() {
+      private void initializeSpeechRecognizer() {
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
             speechRecognizer.setRecognitionListener(new CustomRecognitionListener());
             Log.d(TAG, "Speech recognizer initialized successfully");
+            
+            // Notify Unity that initialization was successful
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechInitialized", "Speech recognizer ready");
         } else {
             Log.e(TAG, "Speech recognition not available on this device");
+            
+            // Notify Unity that initialization failed
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Speech recognition not available on device");
         }
     }
-    
-    public void startListening() {
+      public void startListening() {
         if (speechRecognizer != null && !isListening) {
             Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -44,10 +48,23 @@ public class VoiceBridge {
             
             // Important: Don't show UI - this prevents the popup
             intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+            // Add partial results for better responsiveness
+            intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
             
-            speechRecognizer.startListening(intent);
-            isListening = true;
-            Log.d(TAG, "Started listening for speech (no UI)");
+            try {
+                speechRecognizer.startListening(intent);
+                isListening = true;
+                Log.d(TAG, "Started listening for speech (no UI)");
+                
+                // Send status to Unity
+                UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechListeningStarted", "Listening started");
+            } catch (Exception e) {
+                Log.e(TAG, "Error starting speech recognition: " + e.getMessage());
+                UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Failed to start listening: " + e.getMessage());
+                isListening = false;
+            }
+        } else {
+            Log.w(TAG, "Cannot start listening - speechRecognizer: " + speechRecognizer + ", isListening: " + isListening);
         }
     }
     
