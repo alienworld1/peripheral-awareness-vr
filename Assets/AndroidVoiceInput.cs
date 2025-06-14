@@ -217,9 +217,7 @@ public class AndroidVoiceInput : MonoBehaviour
                 }
             }
         }
-    }
-
-    // This method will be called from Android native code or Unity messaging
+    }    // This method will be called from Android native code or Unity messaging
     public void OnSpeechResult(string result)
     {
         if (!string.IsNullOrEmpty(result))
@@ -234,9 +232,14 @@ public class AndroidVoiceInput : MonoBehaviour
             }
         }
 
-        // Restart listening immediately for continuous recognition
+        // Don't restart immediately - let the VR display control timing
         isListening = false;
-        Invoke("StartListening", 0.1f);
+        
+        // Only restart if we're still supposed to be listening for this letter
+        if (vrDisplay != null && vrDisplay.IsDisplayingLetters() && vrDisplay.ShouldContinueListening())
+        {
+            Invoke("StartListening", 0.5f); // Short delay before restarting
+        }
     }
     
     // Alternative method that handles multiple results
@@ -598,24 +601,25 @@ public class AndroidVoiceInput : MonoBehaviour
         
         // Wait a moment for initialization to complete, then check if we should start
         Invoke("CheckIfShouldStartListening", 1f);
-    }
-
-    private void CheckIfShouldStartListening()
+    }    private void CheckIfShouldStartListening()
     {
-        Debug.Log($"🔍 Checking if should start listening - isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}");
+        Debug.Log($"🔍 Voice recognition initialized and ready for synchronized listening - isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}");
         
-        // If letters are already displayed, start listening
+        // Don't auto-start listening - wait for synchronized StartListeningForLetter() calls
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🎙️ Voice ready - waiting for letter sync", true);
+        }
+        
+        // If letters are already displaying, let the VR display know we're ready
         if (vrDisplay != null && vrDisplay.IsDisplayingLetters())
         {
-            Debug.Log("🔤 Letters already displayed, starting voice recognition immediately");
-            StartListeningWhenReady();
+            Debug.Log("🔤 Letters already displayed - voice system ready for sync");
         }
         else
         {
-            // Wait for letters to be displayed
-            Debug.Log("⏳ Letters not yet displayed, waiting...");
-            waitingForLetterDisplay = true;
-            StartCoroutine(WaitForLetterDisplay());
+            Debug.Log("⏳ Voice system ready - waiting for letters to start");
+            waitingForLetterDisplay = false; // We don't need to wait anymore, just be ready
         }
     }
 
@@ -649,13 +653,16 @@ public class AndroidVoiceInput : MonoBehaviour
                 vrDisplay.UpdateVoiceFeedback("🎤 Voice recognition active", true);
             }
         }
-    }
-
-    public void OnLettersReady()
+    }    public void OnLettersReady()
     {
-        Debug.Log("📧 Received notification that letters are ready");
+        Debug.Log("📧 Received notification that letters are ready for synchronized listening");
         waitingForLetterDisplay = false;
-        StartListeningWhenReady();
+        
+        // Don't start listening automatically - wait for StartListeningForLetter() calls
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition ready for synchronized listening", true);
+        }
     }
 
     public void OnSpeechListeningStarted(string message)
@@ -731,5 +738,32 @@ public class AndroidVoiceInput : MonoBehaviour
         
         // Restart the entire process
         Invoke("RequestMicrophonePermission", 1f);
+    }    // Method called by VR display to start listening for a specific letter
+    public void StartListeningForLetter()
+    {
+        Debug.Log("🎯 Starting voice listening for new letter");
+        CancelInvoke("StartListening"); // Cancel any pending restart
+        
+        if (vrDisplay != null)
+        {
+            string currentLetter = vrDisplay.GetCurrentLetter();
+            Debug.Log($"🔤 Now listening for letter: {currentLetter}");
+        }
+        
+        StartListening();
+    }
+
+    // Method called by VR display to stop listening (letter is changing)
+    public void StopListeningForLetter()
+    {
+        Debug.Log("🛑 Stopping voice listening (letter changing)");
+        CancelInvoke("StartListening"); // Cancel any pending restart
+        StopListening();
+    }
+
+    // Method to check if we should continue listening (called after speech result)
+    public bool ShouldContinueListening()
+    {
+        return vrDisplay != null && vrDisplay.ShouldContinueListening();
     }
 }

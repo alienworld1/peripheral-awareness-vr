@@ -48,6 +48,10 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
     private Quaternion baseRotation = Quaternion.identity;
     private bool gyroEnabled = false;
 
+    // Track if we should continue listening for the current letter
+    private bool shouldContinueListening = false;
+    private Coroutine currentLetterCoroutine = null;
+
     [System.Serializable]
     public class PeripheralLetterData
     {
@@ -263,23 +267,68 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
     {
         isDisplaying = true;
         
-        // Notify voice input that letters are now ready
+        // Initial notification that letters are ready (for permission setup)
         NotifyVoiceInputReady();
         
         while (isDisplaying)
         {
+            // Hide all letters first
             foreach (var letter in instantiatedLetters)
                 letter.SetActive(false);
 
-            if (currentIndex < instantiatedLetters.Count)
+            // Stop voice listening before changing letters
+            shouldContinueListening = false;
+            if (voiceInput != null)
             {
-                instantiatedLetters[currentIndex].SetActive(true);
-                Debug.Log($"🔠 Showing letter: {GetCurrentLetter()}");
+                voiceInput.StopListeningForLetter();
+                UpdateVoiceListeningStatus(false);
             }
 
-            yield return new WaitForSeconds(displayInterval);
+            if (currentIndex < instantiatedLetters.Count)
+            {
+                // Show the new letter
+                instantiatedLetters[currentIndex].SetActive(true);
+                Debug.Log($"🔠 Showing letter: {GetCurrentLetter()}");
+                
+                // Wait a brief moment for letter to be visible, then start voice listening
+                yield return new WaitForSeconds(0.2f);
+                
+                // Start voice listening for this specific letter
+                shouldContinueListening = true;
+                if (voiceInput != null)
+                {
+                    voiceInput.StartListeningForLetter();
+                    UpdateVoiceListeningStatus(true);
+                }
+                
+                // Listen for the main display duration
+                yield return new WaitForSeconds(displayInterval - 0.2f);
+                
+                // Stop listening before letter change
+                shouldContinueListening = false;
+                if (voiceInput != null)
+                {
+                    voiceInput.StopListeningForLetter();
+                    UpdateVoiceListeningStatus(false);
+                }
+            }
+            else
+            {
+                // No letter to show, just wait
+                yield return new WaitForSeconds(displayInterval);
+            }
+
+            // Move to next letter and wait between letters
             currentIndex = (currentIndex + 1) % instantiatedLetters.Count;
             yield return new WaitForSeconds(intervalBetweenLetters);
+        }
+        
+        // Stop listening when sequence ends
+        shouldContinueListening = false;
+        if (voiceInput != null)
+        {
+            voiceInput.StopListeningForLetter();
+            UpdateVoiceListeningStatus(false);
         }
     }
 
@@ -444,6 +493,37 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         {
             UpdateVoiceFeedback("🔄 Restarting voice recognition...", false);
             voiceInput.RestartVoiceRecognitionSystem();
+        }
+    }
+
+    // Method to check if voice input should continue listening
+    public bool ShouldContinueListening()
+    {
+        return shouldContinueListening && isDisplaying;
+    }
+
+    // Method to update voice listening status in UI
+    private void UpdateVoiceListeningStatus(bool isListening)
+    {
+        if (feedbackText != null)
+        {
+            TextMeshPro textMesh = feedbackText.GetComponent<TextMeshPro>();
+            if (isListening)
+            {
+                textMesh.text = "🎤 Listening...";
+                textMesh.color = Color.green;
+                feedbackText.SetActive(true);
+            }
+            else
+            {
+                textMesh.text = "⏸️ Voice paused";
+                textMesh.color = Color.yellow;
+                feedbackText.SetActive(true);
+                
+                // Auto-hide after 1 second
+                CancelInvoke("ClearVoiceFeedback");
+                Invoke("ClearVoiceFeedback", 1f);
+            }
         }
     }
 }
