@@ -1,7 +1,9 @@
 package com.unity3d.player;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -9,6 +11,7 @@ import android.speech.SpeechRecognizer;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.Locale;
+import android.Manifest;
 
 public class VoiceBridge {
     
@@ -17,18 +20,48 @@ public class VoiceBridge {
     private Context context;
     private String gameObjectName;
     private boolean isListening = false;
+    private boolean isInitialized = false;
     
     public VoiceBridge(Context context, String gameObjectName) {
         this.context = context;
         this.gameObjectName = gameObjectName;
-        initializeSpeechRecognizer();
+        
+        Log.d(TAG, "VoiceBridge constructor called with gameObject: " + gameObjectName);
+        
+        // Check permissions first
+        if (checkMicrophonePermission()) {
+            Log.d(TAG, "Microphone permission granted, initializing...");
+            // Ensure we run on UI thread for speech recognition
+            if (context instanceof Activity) {
+                ((Activity) context).runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        initializeSpeechRecognizer();
+                    }
+                });
+            } else {
+                initializeSpeechRecognizer();
+            }
+        } else {
+            Log.e(TAG, "Microphone permission not granted!");
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Microphone permission not granted");
+        }
     }
-      private void initializeSpeechRecognizer() {
+    
+    private boolean checkMicrophonePermission() {
+        int permission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO);
+        boolean hasPermission = permission == PackageManager.PERMISSION_GRANTED;
+        Log.d(TAG, "Microphone permission check: " + hasPermission);
+        return hasPermission;
+    }
+    
+    private void initializeSpeechRecognizer() {
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
             speechRecognizer.setRecognitionListener(new CustomRecognitionListener());
             Log.d(TAG, "Speech recognizer initialized successfully");
             
+            isInitialized = true;
             // Notify Unity that initialization was successful
             UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechInitialized", "Speech recognizer ready");
         } else {
@@ -37,34 +70,47 @@ public class VoiceBridge {
             // Notify Unity that initialization failed
             UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Speech recognition not available on device");
         }
-    }
-      public void startListening() {
+    }    public void startListening() {
         if (speechRecognizer != null && !isListening) {
-            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
-            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-            intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
-            
-            // Important: Don't show UI - this prevents the popup
-            intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-            // Add partial results for better responsiveness
-            intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-            
-            try {
-                speechRecognizer.startListening(intent);
-                isListening = true;
-                Log.d(TAG, "Started listening for speech (no UI)");
-                
-                // Send status to Unity
-                UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechListeningStarted", "Listening started");
-            } catch (Exception e) {
-                Log.e(TAG, "Error starting speech recognition: " + e.getMessage());
-                UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Failed to start listening: " + e.getMessage());
-                isListening = false;
+            // Ensure we run on UI thread
+            if (context instanceof Activity) {
+                ((Activity) context).runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        performStartListening();
+                    }
+                });
+            } else {
+                performStartListening();
             }
         } else {
             Log.w(TAG, "Cannot start listening - speechRecognizer: " + speechRecognizer + ", isListening: " + isListening);
+        }
+    }
+    
+    private void performStartListening() {
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
+        
+        // Important: Don't show UI - this prevents the popup
+        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+        // Add partial results for better responsiveness
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        
+        try {
+            speechRecognizer.startListening(intent);
+            isListening = true;
+            Log.d(TAG, "Started listening for speech (no UI)");
+            
+            // Send status to Unity
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechListeningStarted", "Listening started");
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting speech recognition: " + e.getMessage());
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnSpeechError", "Failed to start listening: " + e.getMessage());
+            isListening = false;
         }
     }
     

@@ -98,18 +98,32 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
 
             // Apply to cameras
             if (leftEyeCamera != null)
-                leftEyeCamera.transform.localRotation = correctedRotation;
-
+                leftEyeCamera.transform.rotation = correctedRotation;
             if (rightEyeCamera != null)
-                rightEyeCamera.transform.localRotation = correctedRotation;
-            
-            if (fixationPoint != null)
-            {
-                fixationPoint.transform.LookAt(leftEyeCamera.transform);
-                fixationPoint.transform.Rotate(0, 180, 0);
-            }
-
+                rightEyeCamera.transform.rotation = correctedRotation;
         }
+
+        // Debug keys for testing voice recognition on device
+#if !UNITY_EDITOR || UNITY_ANDROID
+        if (Input.GetKeyDown(KeyCode.V))
+        {
+            ShowVoiceStatus();
+        }
+        else if (Input.GetKeyDown(KeyCode.R))
+        {
+            RestartVoiceRecognition();
+        }
+        else if (Input.GetKeyDown(KeyCode.T))
+        {
+            // Test voice input with current letter
+            if (voiceInput != null && instantiatedLetters.Count > 0)
+            {
+                string currentLetter = GetCurrentLetter();
+                Debug.Log($"🧪 Testing voice input with letter: {currentLetter}");
+                voiceInput.SimulateVoiceInput(currentLetter);
+            }
+        }
+#endif
     }
 
 
@@ -312,6 +326,7 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         textMesh.color = feedbackColor;
         textMesh.alignment = TextAlignmentOptions.Center;
         textMesh.fontStyle = FontStyles.Bold;
+        textMesh.fontSize = 0.5f;
 
         // Position at the bottom of the view
         feedbackText.transform.position = fixedPosition + new Vector3(0, -0.3f, distanceFromPlayer);
@@ -331,6 +346,7 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         textMesh.color = Color.cyan;
         textMesh.alignment = TextAlignmentOptions.Center;
         textMesh.fontStyle = FontStyles.Bold;
+        textMesh.fontSize = 0.5f;// Scale down for better fit
 
         // Position at the top of the view
         statsDisplay.transform.position = fixedPosition + new Vector3(0, 0.4f, distanceFromPlayer);
@@ -402,6 +418,32 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         {
             Debug.Log("📢 Notifying voice input that letters are ready");
             voiceInput.OnLettersReady();
+        }
+    }
+
+    // Method to show voice recognition debug status
+    public void ShowVoiceStatus()
+    {
+        if (voiceInput != null)
+        {
+            string status = voiceInput.GetVoiceRecognitionStatus();
+            UpdateVoiceFeedback($"🔍 Voice Status: {status}", false);
+            Debug.Log($"🔍 Voice Recognition Status: {status}");
+        }
+        else
+        {
+            UpdateVoiceFeedback("🔇 Voice input not found", false);
+            Debug.LogWarning("🔇 Voice input component not found");
+        }
+    }
+
+    // Method to manually restart voice recognition
+    public void RestartVoiceRecognition()
+    {
+        if (voiceInput != null)
+        {
+            UpdateVoiceFeedback("🔄 Restarting voice recognition...", false);
+            voiceInput.RestartVoiceRecognitionSystem();
         }
     }
 }

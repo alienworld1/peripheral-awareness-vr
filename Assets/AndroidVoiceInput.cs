@@ -37,12 +37,13 @@ public class AndroidVoiceInput : MonoBehaviour
         Debug.Log("Voice recognition file: " + filePath);
         
         // Find the VR display component
-        vrDisplay = FindObjectOfType<SimpleVRGoggleDisplay>();
-        if (vrDisplay == null)
+        vrDisplay = FindObjectOfType<SimpleVRGoggleDisplay>();        if (vrDisplay == null)
         {
             Debug.LogError("SimpleVRGoggleDisplay not found! Voice recognition needs this component.");
             return;
-        }        // Request microphone permissions first, then initialize
+        }
+        
+        // Request microphone permissions first, then initialize
         RequestMicrophonePermission();
     }
 
@@ -55,41 +56,70 @@ public class AndroidVoiceInput : MonoBehaviour
             hasNewResult = false;
             lastRecognizedText = "";
         }
-    }
-
-    private void InitializeAndroidSpeechRecognition()
+    }    private void InitializeAndroidSpeechRecognition()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
+            Debug.Log("🔧 Starting Android speech recognition initialization...");
+            
             AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
             unityActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+            
+            if (unityActivity == null)
+            {
+                Debug.LogError("❌ Unity activity is null!");
+                return;
+            }
+            
+            Debug.Log("✅ Unity activity obtained successfully");
             
             // Check if speech recognition is available
             AndroidJavaClass speechRecognizerClass = new AndroidJavaClass("android.speech.SpeechRecognizer");
             bool isAvailable = speechRecognizerClass.CallStatic<bool>("isRecognitionAvailable", unityActivity);
             
+            Debug.Log($"🎙️ Speech recognition availability check: {isAvailable}");
+            
             if (isAvailable)
             {
-                Debug.Log("🎙️ Speech recognition is available on this device");
+                Debug.Log("🎙️ Speech recognition is available, creating VoiceBridge...");
                 
                 // Create our VoiceBridge plugin
                 speechRecognizer = new AndroidJavaObject("com.unity3d.player.VoiceBridge", unityActivity, gameObject.name);
                 
-                isInitialized = true;
-                Debug.Log("✅ Voice recognition initialized successfully");
-                
-                // Don't start listening here - wait for permission and letter display
+                if (speechRecognizer != null)
+                {
+                    isInitialized = true;
+                    Debug.Log("✅ Voice recognition initialized successfully with VoiceBridge");
+                    
+                    if (vrDisplay != null)
+                    {
+                        vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition ready", true);
+                    }
+                }
+                else
+                {
+                    Debug.LogError("❌ Failed to create VoiceBridge object");
+                }
             }
             else
             {
                 Debug.LogError("❌ Speech recognition not available on this device");
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔇 Speech recognition not supported on this device", false);
+                }
             }
         }
         catch (System.Exception e)
         {
-            Debug.LogError("Failed to initialize Android Speech Recognition: " + e.Message);
-            Debug.LogError("Stack trace: " + e.StackTrace);
+            Debug.LogError($"❌ Failed to initialize Android Speech Recognition: {e.Message}");
+            Debug.LogError($"Stack trace: {e.StackTrace}");
+            
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback($"🔇 Voice initialization error: {e.Message}", false);
+            }
         }
 #else
         // In editor, mark as initialized
@@ -112,10 +142,10 @@ public class AndroidVoiceInput : MonoBehaviour
 #else
         Debug.Log("Speech recognition only works on Android device");
 #endif
-    }
-
-    public void StartListening()
+    }    public void StartListening()
     {
+        Debug.Log($"🎯 StartListening called - isListening: {isListening}, isInitialized: {isInitialized}, speechRecognizer null: {speechRecognizer == null}, permissionsGranted: {permissionsGranted}");
+        
         if (!isListening && isInitialized && speechRecognizer != null && permissionsGranted)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -125,11 +155,17 @@ public class AndroidVoiceInput : MonoBehaviour
                 speechRecognizer.Call("startListening");
                 isListening = true;
                 
-                Debug.Log("✅ Voice recognition start command sent");
+                Debug.Log("✅ Voice recognition start command sent successfully");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🎤 Listening for speech...", true);
+                }
             }
             catch (System.Exception e)
             {
-                Debug.LogError("❌ Failed to start speech recognition: " + e.Message);
+                Debug.LogError($"❌ Failed to start speech recognition: {e.Message}");
+                Debug.LogError($"Stack trace: {e.StackTrace}");
                 isListening = false;
                 
                 if (vrDisplay != null)
@@ -138,16 +174,49 @@ public class AndroidVoiceInput : MonoBehaviour
                 }
                 
                 // Retry after delay
+                Debug.Log("🔄 Scheduling retry in 2 seconds...");
                 Invoke("StartListening", 2f);
             }
 #else
             Debug.Log("🖥️ Voice recognition simulated (Editor mode)");
             isListening = true;
+            
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("🎤 Voice recognition simulated", true);
+            }
 #endif
         }
         else
         {
-            Debug.LogWarning($"⚠️ Cannot start listening - isListening: {isListening}, isInitialized: {isInitialized}, speechRecognizer: {speechRecognizer != null}, permissionsGranted: {permissionsGranted}");        }
+            Debug.LogWarning($"⚠️ Cannot start listening - isListening: {isListening}, isInitialized: {isInitialized}, speechRecognizer: {speechRecognizer != null}, permissionsGranted: {permissionsGranted}");
+            
+            // Try to diagnose the issue
+            if (!permissionsGranted)
+            {
+                Debug.LogWarning("❗ Microphone permission not granted");
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔒 Microphone permission required", false);
+                }
+            }
+            else if (!isInitialized)
+            {
+                Debug.LogWarning("❗ Voice recognition not initialized");
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔧 Voice recognition not initialized", false);
+                }
+            }
+            else if (speechRecognizer == null)
+            {
+                Debug.LogWarning("❗ Speech recognizer object is null");
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔇 Speech recognizer error", false);
+                }
+            }
+        }
     }
 
     // This method will be called from Android native code or Unity messaging
@@ -176,12 +245,12 @@ public class AndroidVoiceInput : MonoBehaviour
         if (!string.IsNullOrEmpty(results))
         {
             // Parse multiple results if available
-            string[] resultArray = results.Split(',');
-            if (resultArray.Length > 0)
+            string[] resultArray = results.Split(',');            if (resultArray.Length > 0)
             {
                 OnSpeechResult(resultArray[0].Trim()); // Use the first (most confident) result
             }
-        }    }
+        }
+    }
 
     public void OnSpeechError(string error)
     {
@@ -200,13 +269,13 @@ public class AndroidVoiceInput : MonoBehaviour
         if (error.Contains("No match") || error.Contains("No speech input"))
         {
             delay = 0.5f; // Quick restart for common errors
-        }
-        else if (error.Contains("Network"))
+        }        else if (error.Contains("Network"))
         {
             delay = 3f; // Longer delay for network issues
         }
         
-        Invoke("StartListening", delay);    }
+        Invoke("StartListening", delay);
+    }
 
     private void ProcessVoiceResult(string recognizedText)
     {
@@ -235,11 +304,11 @@ public class AndroidVoiceInput : MonoBehaviour
             isCorrect = true;
             correctAnswers++;
         }
-        
-        // Log the result
+          // Log the result
         string resultText = $"Target: {targetLetter}, Heard: '{cleanedText}', Correct: {isCorrect}";
         Debug.Log($"🎯 {resultText}");
-          // Update UI feedback
+        
+        // Update UI feedback
         string feedbackMessage = isCorrect ? 
             $"✓ Correct! Said '{cleanedText}' for '{targetLetter}'" : 
             $"✗ Wrong: Said '{cleanedText}' for '{targetLetter}'";
@@ -412,9 +481,7 @@ public class AndroidVoiceInput : MonoBehaviour
         {
             Invoke("StartListening", 1f);
         }
-    }
-
-    private void RequestMicrophonePermission()
+    }    private void RequestMicrophonePermission()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
@@ -439,8 +506,8 @@ public class AndroidVoiceInput : MonoBehaviour
                 // Request permission using Unity's system
                 UnityEngine.Android.Permission.RequestUserPermission(UnityEngine.Android.Permission.Microphone);
                 
-                // Start checking for permission result
-                StartCoroutine(CheckPermissionResult());
+                // Start checking for permission result with a more robust approach
+                StartCoroutine(CheckPermissionResultRobust());
             }
         }
         catch (System.Exception e)
@@ -455,7 +522,40 @@ public class AndroidVoiceInput : MonoBehaviour
 #endif
     }
 
-    private System.Collections.IEnumerator CheckPermissionResult()
+    private System.Collections.IEnumerator CheckPermissionResultRobust()
+    {
+        float timeout = 30f; // 30 second timeout
+        float elapsed = 0f;
+        
+        Debug.Log("⏳ Starting permission check loop...");
+        
+        while (elapsed < timeout && !permissionsGranted)
+        {
+            yield return new WaitForSeconds(0.5f);
+            elapsed += 0.5f;
+            
+#if UNITY_ANDROID && !UNITY_EDITOR
+            bool hasPermission = UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone);
+            Debug.Log($"🔍 Permission check {elapsed:F1}s: {hasPermission}");
+            
+            if (hasPermission)
+            {
+                Debug.Log("✅ Microphone permission granted!");
+                OnPermissionGranted();
+                yield break;
+            }
+#endif
+        }
+        
+        if (!permissionsGranted)
+        {
+            Debug.LogError("❌ Microphone permission not granted or timed out");
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("🔇 Microphone permission required. Please restart app and grant permission.", false);
+            }
+        }
+    }private System.Collections.IEnumerator CheckPermissionResult()
     {
         float timeout = 30f; // 30 second timeout
         float elapsed = 0f;
@@ -483,24 +583,37 @@ public class AndroidVoiceInput : MonoBehaviour
                 vrDisplay.UpdateVoiceFeedback("🔇 Microphone permission required. Please restart app and grant permission.", false);
             }
         }
-    }
-
-    private void OnPermissionGranted()
+    }private void OnPermissionGranted()
     {
         permissionsGranted = true;
-        Debug.Log("🎤 Initializing voice recognition...");
+        Debug.Log("🎤 Microphone permission granted, initializing voice recognition...");
+        
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🎤 Microphone access granted", true);
+        }
         
         // Initialize Android Speech Recognition
         InitializeAndroidSpeechRecognition();
         
+        // Wait a moment for initialization to complete, then check if we should start
+        Invoke("CheckIfShouldStartListening", 1f);
+    }
+
+    private void CheckIfShouldStartListening()
+    {
+        Debug.Log($"🔍 Checking if should start listening - isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}");
+        
         // If letters are already displayed, start listening
         if (vrDisplay != null && vrDisplay.IsDisplayingLetters())
         {
+            Debug.Log("🔤 Letters already displayed, starting voice recognition immediately");
             StartListeningWhenReady();
         }
         else
         {
             // Wait for letters to be displayed
+            Debug.Log("⏳ Letters not yet displayed, waiting...");
             waitingForLetterDisplay = true;
             StartCoroutine(WaitForLetterDisplay());
         }
@@ -579,5 +692,44 @@ public class AndroidVoiceInput : MonoBehaviour
         Debug.Log("🔄 Force restarting voice recognition...");
         StopListening();
         Invoke("StartListening", 1f);
+    }
+
+    // Public method to get current status for debugging
+    public string GetVoiceRecognitionStatus()
+    {
+        return $"isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}, " +
+               $"isListening: {isListening}, speechRecognizer: {speechRecognizer != null}, " +
+               $"vrDisplay: {vrDisplay != null}, waitingForLetterDisplay: {waitingForLetterDisplay}";
+    }
+
+    // Method to force a complete restart of the voice recognition system
+    public void RestartVoiceRecognitionSystem()
+    {
+        Debug.Log("🔄 Force restarting entire voice recognition system...");
+        
+        // Stop everything
+        StopListening();
+        isInitialized = false;
+        permissionsGranted = false;
+        waitingForLetterDisplay = false;
+        
+        // Clean up existing speechRecognizer
+        if (speechRecognizer != null)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                speechRecognizer.Call("destroy");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("Error destroying speech recognizer during restart: " + e.Message);
+            }
+#endif
+            speechRecognizer = null;
+        }
+        
+        // Restart the entire process
+        Invoke("RequestMicrophonePermission", 1f);
     }
 }
