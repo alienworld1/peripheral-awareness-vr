@@ -421,6 +421,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f362a523ba6edf145b0cd30c80a3a078, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  recognitionTimeout: 3
+  confidenceThreshold: 0.5
+  logAllResults: 1
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0
@@ -500,18 +503,21 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   fixationSymbol: +
-  fixationSize: 0.009
+  fixationSize: 0.05
   enableStereoView: 1
   eyeSeparation: 0.064
   fixedPosition: {x: 0, y: 1.6, z: 0}
   distanceFromPlayer: 0.6
   peripheralFontSize: 0.04
   letterColor: {r: 0, g: 0, b: 0, a: 1}
-  displayInterval: 2
+  displayInterval: 6
   intervalBetweenLetters: 0.5
   minSize: 0.03
   maxSize: 0.08
   randomizeSize: 1
+  enableVoiceRecognition: 1
+  feedbackColor: {r: 0, g: 1, b: 0, a: 1}
+  showPerformanceStats: 1
 --- !u!4 &1006927524
 Transform:
   m_ObjectHideFlags: 0

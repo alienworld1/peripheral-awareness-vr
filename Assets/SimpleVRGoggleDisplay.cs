@@ -18,10 +18,8 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
     [Header("Chart Display Settings")]
     public float distanceFromPlayer = 0.6f;
     public float peripheralFontSize = 0.04f;
-    public Color letterColor = Color.white;
-
-    [Header("Letter Display")]
-    public float displayInterval = 2f;
+    public Color letterColor = Color.black;    [Header("Letter Display")]
+    public float displayInterval = 6f;  // Increased from 2f to give more time for speech recognition
     public float intervalBetweenLetters = 0.5f;
     public float minSize = 0.03f;
     public float maxSize = 0.08f;
@@ -105,9 +103,7 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
                 leftEyeCamera.transform.rotation = correctedRotation;
             if (rightEyeCamera != null)
                 rightEyeCamera.transform.rotation = correctedRotation;
-        }
-
-        // Debug keys for testing voice recognition on device
+        }        // Debug keys for testing voice recognition on device
 #if !UNITY_EDITOR || UNITY_ANDROID
         if (Input.GetKeyDown(KeyCode.V))
         {
@@ -125,6 +121,112 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
                 string currentLetter = GetCurrentLetter();
                 Debug.Log($"🧪 Testing voice input with letter: {currentLetter}");
                 voiceInput.SimulateVoiceInput(currentLetter);
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.M))
+        {
+            // Test letter matching with various inputs
+            if (voiceInput != null && instantiatedLetters.Count > 0)
+            {
+                string currentLetter = GetCurrentLetter();
+                Debug.Log($"🧪 Testing letter matching for: {currentLetter}");
+                
+                // Test various inputs
+                voiceInput.TestLetterMatching(currentLetter, currentLetter); // Exact
+                voiceInput.TestLetterMatching(currentLetter.ToLower(), currentLetter); // Lowercase
+                voiceInput.TestLetterMatching("ALPHA", "A"); // Phonetic
+                voiceInput.TestLetterMatching("BEE", "B"); // Phonetic
+                voiceInput.TestLetterMatching("SEE", "C"); // Phonetic
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.B))
+        {
+            // Test VoiceBridge connection
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing VoiceBridge connection...");
+                voiceInput.TestVoiceBridge();
+            }
+        }        else if (Input.GetKeyDown(KeyCode.D))
+        {
+            // Debug entire voice pipeline
+            if (voiceInput != null)
+            {
+                Debug.Log("🔍 Running voice pipeline debug...");
+                voiceInput.DebugVoicePipeline();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.S))
+        {
+            // Test speech result with current letter
+            if (voiceInput != null && instantiatedLetters.Count > 0)
+            {
+                string currentLetter = GetCurrentLetter();
+                Debug.Log($"🧪 Testing speech result with letter: {currentLetter}");
+                voiceInput.TestSpeechResult(currentLetter);
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.Q))
+        {
+            // Test speech recognizer status
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing speech recognizer status...");
+                voiceInput.TestSpeechRecognizerStatus();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.C))
+        {
+            // Test speech recognition capabilities
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing speech recognition capabilities...");
+                voiceInput.TestCapabilities();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.U))
+        {
+            // Test ultra-aggressive recognition mode
+            if (voiceInput != null)
+            {
+                Debug.Log("🚀 Testing ultra-aggressive recognition mode...");
+                voiceInput.StartUltraAggressiveListening();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.I))
+        {
+            // Reinitialize speech recognizer (fix busy states)
+            if (voiceInput != null)
+            {
+                Debug.Log("🔄 Reinitializing speech recognizer...");
+                voiceInput.ReinitializeSpeechRecognizer();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.A))
+        {
+            // Enable AudioRecord fallback mode
+            if (voiceInput != null)
+            {
+                Debug.Log("🎤 Enabling AudioRecord fallback...");
+                voiceInput.EnableAudioRecordFallback();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.F))
+        {
+            // Test AudioRecord speech detection
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing AudioRecord speech detection...");
+                voiceInput.TestAudioRecordSpeechDetection();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.G))
+        {
+            // Test AudioRecord states sequence
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing AudioRecord states sequence...");
+                voiceInput.TestAudioRecordStates();
             }
         }
 #endif
@@ -282,32 +384,35 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
             {
                 voiceInput.StopListeningForLetter();
                 UpdateVoiceListeningStatus(false);
-            }
-
-            if (currentIndex < instantiatedLetters.Count)
+            }            if (currentIndex < instantiatedLetters.Count)
             {
                 // Show the new letter
                 instantiatedLetters[currentIndex].SetActive(true);
-                Debug.Log($"🔠 Showing letter: {GetCurrentLetter()}");
+                string currentLetter = GetCurrentLetter();
+                Debug.Log($"🔠 Showing letter: {currentLetter}");
                 
-                // Wait a brief moment for letter to be visible, then start voice listening
-                yield return new WaitForSeconds(0.2f);
+                // Wait a bit longer for letter to be visible, then start voice listening
+                yield return new WaitForSeconds(0.5f);
                 
                 // Start voice listening for this specific letter
                 shouldContinueListening = true;
                 if (voiceInput != null)
                 {
+                    Debug.Log($"⏰ Starting voice listening for letter '{currentLetter}' - will listen for {displayInterval - 0.5f} seconds");
                     voiceInput.StartListeningForLetter();
                     UpdateVoiceListeningStatus(true);
                 }
                 
-                // Listen for the main display duration
-                yield return new WaitForSeconds(displayInterval - 0.2f);
+                // Listen for the main display duration (now 5.5 seconds instead of 1.8)
+                float listeningDuration = displayInterval - 0.5f;
+                Debug.Log($"⏱️ Listening for {listeningDuration} seconds...");
+                yield return new WaitForSeconds(listeningDuration);
                 
                 // Stop listening before letter change
                 shouldContinueListening = false;
                 if (voiceInput != null)
                 {
+                    Debug.Log($"⏰ Stopping voice listening for letter '{currentLetter}' after {listeningDuration} seconds");
                     voiceInput.StopListeningForLetter();
                     UpdateVoiceListeningStatus(false);
                 }
@@ -359,6 +464,7 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         textMesh.color = letterColor;
         textMesh.alignment = TextAlignmentOptions.Center;
         textMesh.fontStyle = FontStyles.Bold;
+        textMesh.fontSize = 0.5f; // Scale down for better fit
 
         fixationPoint.transform.position = fixedPosition + new Vector3(0, 0, distanceFromPlayer);
         fixationPoint.transform.LookAt(leftEyeCamera.transform);
@@ -370,7 +476,7 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
         feedbackText = new GameObject("VoiceFeedback");
         TextMeshPro textMesh = feedbackText.AddComponent<TextMeshPro>();
 
-        textMesh.text = "🎤 Voice Recognition Ready";
+        textMesh.text = ""; // Remove voice feedback text as requested
         textMesh.fontSize = 0.03f * 100;
         textMesh.color = feedbackColor;
         textMesh.alignment = TextAlignmentOptions.Center;
@@ -410,20 +516,10 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
             TextMeshPro textMesh = statsDisplay.GetComponent<TextMeshPro>();
             textMesh.text = $"Accuracy: {accuracy:F1}% ({correct}/{total})";
         }
-    }
-
-    public void UpdateVoiceFeedback(string message, bool isCorrect = false)
+    }    public void UpdateVoiceFeedback(string message, bool isCorrect = false)
     {
-        if (feedbackText != null)
-        {
-            TextMeshPro textMesh = feedbackText.GetComponent<TextMeshPro>();
-            textMesh.text = message;
-            textMesh.color = isCorrect ? Color.green : Color.yellow;
-            
-            // Auto-clear after 2 seconds
-            CancelInvoke("ClearVoiceFeedback");
-            Invoke("ClearVoiceFeedback", 2f);
-        }
+        // Voice feedback UI disabled as requested - only keep debug logs
+        Debug.Log($"Voice feedback: {message}");
     }
 
     void ClearVoiceFeedback()

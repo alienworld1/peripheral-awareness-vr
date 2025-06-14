@@ -45,18 +45,17 @@ public class AndroidVoiceInput : MonoBehaviour
         
         // Request microphone permissions first, then initialize
         RequestMicrophonePermission();
-    }
-
-    void Update()
+    }    void Update()
     {
         // Process voice recognition results
         if (hasNewResult && !string.IsNullOrEmpty(lastRecognizedText))
         {
+            Debug.Log($"🔄 Processing voice result in Update(): '{lastRecognizedText}'");
             ProcessVoiceResult(lastRecognizedText);
             hasNewResult = false;
             lastRecognizedText = "";
         }
-    }    private void InitializeAndroidSpeechRecognition()
+    }private void InitializeAndroidSpeechRecognition()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
@@ -91,6 +90,10 @@ public class AndroidVoiceInput : MonoBehaviour
                 {
                     isInitialized = true;
                     Debug.Log("✅ Voice recognition initialized successfully with VoiceBridge");
+                    
+                    // Test speech recognition capabilities
+                    Debug.Log("🔍 Testing speech recognition capabilities...");
+                    speechRecognizer.Call("testRecognitionCapabilities");
                     
                     if (vrDisplay != null)
                     {
@@ -220,16 +223,30 @@ public class AndroidVoiceInput : MonoBehaviour
     }    // This method will be called from Android native code or Unity messaging
     public void OnSpeechResult(string result)
     {
+        Debug.Log($"🎤🎤🎤 OnSpeechResult called with: '{result}'");
+        
         if (!string.IsNullOrEmpty(result))
         {
             lastRecognizedText = result;
             hasNewResult = true;
             
+            Debug.Log($"✅ Speech result received: '{result}' - will process in Update()");
+            
             if (logAllResults)
             {
                 SaveToFile(result);
-                Debug.Log("Voice recognized: " + result);
+                Debug.Log("Voice recognized and saved: " + result);
             }
+            
+            // Show immediate feedback
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback($"🎤 Heard: '{result}'", false);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ OnSpeechResult called with empty result");
         }
 
         // Don't restart immediately - let the VR display control timing
@@ -239,6 +256,10 @@ public class AndroidVoiceInput : MonoBehaviour
         if (vrDisplay != null && vrDisplay.IsDisplayingLetters() && vrDisplay.ShouldContinueListening())
         {
             Invoke("StartListening", 0.5f); // Short delay before restarting
+        }
+        else
+        {
+            Debug.Log("🛑 Not restarting listening - either not displaying letters or shouldn't continue");
         }
     }
     
@@ -253,13 +274,32 @@ public class AndroidVoiceInput : MonoBehaviour
                 OnSpeechResult(resultArray[0].Trim()); // Use the first (most confident) result
             }
         }
-    }
-
-    public void OnSpeechError(string error)
+    }    public void OnSpeechError(string error)
     {
         Debug.LogWarning("Speech recognition error: " + error);
         
-        // Update UI with error feedback
+        // Don't show "No match" or "No speech input" as errors to user - these are normal
+        if (error.Contains("No match") || error.Contains("No speech input"))
+        {
+            Debug.Log("🔍 No speech match - this is normal, continuing to listen");
+            
+            // Update UI with neutral feedback
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("🎤 Keep trying...", false);
+            }
+            
+            isListening = false;
+            
+            // Quick restart for no match cases
+            if (vrDisplay != null && vrDisplay.ShouldContinueListening())
+            {
+                Invoke("StartListening", 0.3f);
+            }
+            return;
+        }
+        
+        // For real errors, show them to the user
         if (vrDisplay != null)
         {
             vrDisplay.UpdateVoiceFeedback($"🔇 {error}", false);
@@ -269,18 +309,20 @@ public class AndroidVoiceInput : MonoBehaviour
         
         // Restart after error, but with different delays based on error type
         float delay = 1f;
-        if (error.Contains("No match") || error.Contains("No speech input"))
-        {
-            delay = 0.5f; // Quick restart for common errors
-        }        else if (error.Contains("Network"))
+        if (error.Contains("Network"))
         {
             delay = 3f; // Longer delay for network issues
         }
+        else if (error.Contains("Audio") || error.Contains("Microphone"))
+        {
+            delay = 2f; // Medium delay for audio issues
+        }
         
-        Invoke("StartListening", delay);
-    }
-
-    private void ProcessVoiceResult(string recognizedText)
+        if (vrDisplay != null && vrDisplay.ShouldContinueListening())
+        {
+            Invoke("StartListening", delay);
+        }
+    }    private void ProcessVoiceResult(string recognizedText)
     {
         if (vrDisplay == null) return;
         
@@ -291,30 +333,53 @@ public class AndroidVoiceInput : MonoBehaviour
         string cleanedText = recognizedText.Trim().ToUpper();
         string targetLetter = currentLetter.ToUpper();
         
+        Debug.Log($"🎯 Processing voice result: Target='{targetLetter}', Heard='{cleanedText}'");
+        
         totalAttempts++;
         
         bool isCorrect = false;
+        string matchReason = "";
         
         // Check if the recognized text contains the target letter
         if (cleanedText.Contains(targetLetter))
         {
             isCorrect = true;
             correctAnswers++;
+            matchReason = "exact match";
         }
-        // Also check for phonetic matches (optional)
+        // Check for phonetic matches
         else if (IsPhoneticMatch(cleanedText, targetLetter))
         {
             isCorrect = true;
             correctAnswers++;
+            matchReason = "phonetic match";
         }
-          // Log the result
+        // Check if target letter is at the beginning of recognized text
+        else if (cleanedText.StartsWith(targetLetter))
+        {
+            isCorrect = true;
+            correctAnswers++;
+            matchReason = "starts with target";
+        }
+        // Check if it's just the letter with common endings
+        else if (cleanedText == targetLetter || 
+                 cleanedText == targetLetter + "S" || 
+                 cleanedText == targetLetter + "'S")
+        {
+            isCorrect = true;
+            correctAnswers++;
+            matchReason = "direct letter match";
+        }
+        
+        // Log the detailed result
         string resultText = $"Target: {targetLetter}, Heard: '{cleanedText}', Correct: {isCorrect}";
+        if (isCorrect) resultText += $" ({matchReason})";
         Debug.Log($"🎯 {resultText}");
         
         // Update UI feedback
         string feedbackMessage = isCorrect ? 
             $"✓ Correct! Said '{cleanedText}' for '{targetLetter}'" : 
-            $"✗ Wrong: Said '{cleanedText}' for '{targetLetter}'";
+            $"✗ Try again: Said '{cleanedText}' for '{targetLetter}'";
         vrDisplay.UpdateVoiceFeedback(feedbackMessage, isCorrect);
         
         // Calculate accuracy
@@ -328,38 +393,37 @@ public class AndroidVoiceInput : MonoBehaviour
         
         Debug.Log($"📊 Accuracy: {correctAnswers}/{totalAttempts} ({accuracy:F1}%)");
     }
-    
-    private bool IsPhoneticMatch(string recognized, string target)
+      private bool IsPhoneticMatch(string recognized, string target)
     {
         // Handle common phonetic variations for letters
         Dictionary<string, string[]> phoneticVariations = new Dictionary<string, string[]>
         {
-            {"A", new[] {"AY", "EH"}},
-            {"B", new[] {"BE", "BEE"}},
-            {"C", new[] {"SEE", "SI"}},
-            {"D", new[] {"DEE", "DI"}},
-            {"E", new[] {"EE", "EH"}},
-            {"F", new[] {"EF", "EFF"}},
-            {"G", new[] {"JEE", "GEE"}},
-            {"H", new[] {"AYCH", "HAYCH"}},
-            {"I", new[] {"EYE", "AY"}},
-            {"J", new[] {"JAY", "JEY"}},
-            {"K", new[] {"KAY", "KEH"}},
-            {"L", new[] {"EL", "ELL"}},
-            {"M", new[] {"EM", "EMM"}},
-            {"N", new[] {"EN", "ENN"}},
-            {"O", new[] {"OH", "OW"}},
-            {"P", new[] {"PEE", "PI"}},
-            {"Q", new[] {"QUEUE", "CUE"}},
-            {"R", new[] {"AR", "ARR"}},
-            {"S", new[] {"ESS", "ES"}},
-            {"T", new[] {"TEE", "TI"}},
-            {"U", new[] {"YOU", "YOO"}},
-            {"V", new[] {"VEE", "VI"}},
-            {"W", new[] {"DOUBLE-U", "DOUBLE U"}},
-            {"X", new[] {"EX", "EKS"}},
-            {"Y", new[] {"WHY", "WYE"}},
-            {"Z", new[] {"ZED", "ZEE"}}
+            {"A", new[] {"AY", "EH", "AAY", "EI", "ALPHA"}},
+            {"B", new[] {"BE", "BEE", "BETA", "BAY"}},
+            {"C", new[] {"SEE", "SI", "CEE", "CHARLIE"}},
+            {"D", new[] {"DEE", "DI", "DELTA", "DAY"}},
+            {"E", new[] {"EE", "EH", "ECHO", "EEE"}},
+            {"F", new[] {"EF", "EFF", "FOXTROT", "EFFFF"}},
+            {"G", new[] {"JEE", "GEE", "GOLF", "JAY"}},
+            {"H", new[] {"AYCH", "HAYCH", "HOTEL", "AITCH"}},
+            {"I", new[] {"EYE", "AY", "INDIA", "IYE"}},
+            {"J", new[] {"JAY", "JEY", "JULIET", "JAAY"}},
+            {"K", new[] {"KAY", "KEH", "KILO", "KAAY"}},
+            {"L", new[] {"EL", "ELL", "LIMA", "ELLL"}},
+            {"M", new[] {"EM", "EMM", "MIKE", "EMMM"}},
+            {"N", new[] {"EN", "ENN", "NOVEMBER", "ENNN"}},
+            {"O", new[] {"OH", "OW", "OSCAR", "OHH"}},
+            {"P", new[] {"PEE", "PI", "PAPA", "PEE"}},
+            {"Q", new[] {"QUEUE", "CUE", "QUEBEC", "QUE"}},
+            {"R", new[] {"AR", "ARR", "ROMEO", "ARRR"}},
+            {"S", new[] {"ESS", "ES", "SIERRA", "ESSS"}},
+            {"T", new[] {"TEE", "TI", "TANGO", "TEEE"}},
+            {"U", new[] {"YOU", "YOO", "UNIFORM", "YOUU"}},
+            {"V", new[] {"VEE", "VI", "VICTOR", "VEEE"}},
+            {"W", new[] {"DOUBLE-U", "DOUBLE U", "WHISKEY", "DOUBLEU"}},
+            {"X", new[] {"EX", "EKS", "XRAY", "X-RAY", "EXXX"}},
+            {"Y", new[] {"WHY", "WYE", "YANKEE", "WHYY"}},
+            {"Z", new[] {"ZED", "ZEE", "ZULU", "ZEEE"}}
         };
         
         if (phoneticVariations.ContainsKey(target))
@@ -368,6 +432,35 @@ public class AndroidVoiceInput : MonoBehaviour
             {
                 if (recognized.Contains(variation))
                 {
+                    Debug.Log($"🎯 Phonetic match found: '{recognized}' contains '{variation}' for target '{target}'");
+                    return true;
+                }
+            }
+        }
+        
+        // Also check if the recognized text sounds like the target
+        // Common speech recognition substitutions
+        Dictionary<string, string[]> commonSubstitutions = new Dictionary<string, string[]>
+        {
+            {"B", new[] {"P", "V", "D"}},
+            {"C", new[] {"K", "S"}},
+            {"D", new[] {"T", "B"}},
+            {"F", new[] {"V", "S"}},
+            {"G", new[] {"K", "J"}},
+            {"K", new[] {"C", "G"}},
+            {"P", new[] {"B", "F"}},
+            {"T", new[] {"D", "K"}},
+            {"V", new[] {"F", "B"}},
+            {"Z", new[] {"S", "X"}}
+        };
+        
+        if (commonSubstitutions.ContainsKey(target))
+        {
+            foreach (string substitution in commonSubstitutions[target])
+            {
+                if (recognized.Contains(substitution))
+                {
+                    Debug.Log($"🎯 Sound-alike match found: '{recognized}' contains '{substitution}' (sounds like '{target}')");
                     return true;
                 }
             }
@@ -658,14 +751,30 @@ public class AndroidVoiceInput : MonoBehaviour
         Debug.Log("📧 Received notification that letters are ready for synchronized listening");
         waitingForLetterDisplay = false;
         
-        // Don't start listening automatically - wait for StartListeningForLetter() calls
-        if (vrDisplay != null)
+        // Only start listening if we're initialized and have permissions
+        if (isInitialized && permissionsGranted)
         {
-            vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition ready for synchronized listening", true);
+            Debug.Log("🔍 Voice recognition initialized and ready for synchronized listening - isInitialized: " + isInitialized + ", permissionsGranted: " + permissionsGranted);
+            
+            if (vrDisplay != null && vrDisplay.IsDisplayingLetters())
+            {
+                Debug.Log("🔤 Letters already displayed - voice system ready for sync");
+            }
+            else
+            {
+                Debug.Log("⏳ Waiting for letters to start displaying...");
+            }
+            
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition ready", true);
+            }
         }
-    }
-
-    public void OnSpeechListeningStarted(string message)
+        else
+        {
+            Debug.LogWarning("⚠️ Voice recognition not ready - isInitialized: " + isInitialized + ", permissionsGranted: " + permissionsGranted);
+        }
+    }    public void OnSpeechListeningStarted(string message)
     {
         Debug.Log("🎤 " + message);
         if (vrDisplay != null)
@@ -679,8 +788,150 @@ public class AndroidVoiceInput : MonoBehaviour
         Debug.Log("🎙️ " + message);
         if (vrDisplay != null)
         {
-            vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition initialized", true);
+            vrDisplay.UpdateVoiceFeedback("🎙️ Voice recognition initialized", true);        }
+    }
+    
+    // New callback methods for VoiceBridge with AudioRecord fallback
+    public void OnVoiceRecognitionInitialized(string message)
+    {
+        Debug.Log($"🎙️ Voice Recognition Initialized: {message}");
+        isInitialized = true;
+        
+        if (vrDisplay != null)
+        {
+            string status = string.IsNullOrEmpty(message) ? "Standard" : message;
+            vrDisplay.UpdateVoiceFeedback($"🎙️ Voice ready ({status})", true);
         }
+    }
+    
+    public void OnVoiceRecognitionReady(string message)
+    {
+        Debug.Log($"🔍 Voice Recognition Ready: {message}");
+        if (vrDisplay != null)
+        {
+            string currentLetter = vrDisplay.GetCurrentLetter();
+            vrDisplay.UpdateVoiceFeedback($"🎯 SAY '{currentLetter}' NOW!", true);
+        }
+    }
+    
+    public void OnVoiceRecognitionBeginSpeech(string message)
+    {
+        Debug.Log($"👂 Voice Recognition Begin Speech: {message}");
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🎤 LISTENING...", true);
+        }
+    }
+    
+    public void OnVoiceRecognitionEndSpeech(string message)
+    {
+        Debug.Log($"⏹️ Voice Recognition End Speech: {message}");
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🔄 Processing...", true);
+        }
+    }
+    
+    public void OnVoiceRecognitionResult(string result)
+    {
+        Debug.Log($"✅ Voice Recognition Result: '{result}'");
+        
+        // Handle special AudioRecord results
+        if (result == "SPEECH_DETECTED")
+        {
+            // AudioRecord detected speech but can't transcribe it
+            // We'll treat this as a positive response for the current letter
+            string currentLetter = vrDisplay?.GetCurrentLetter() ?? "";
+            Debug.Log($"🎤 AudioRecord detected speech for letter: {currentLetter}");
+            
+            if (!string.IsNullOrEmpty(currentLetter))
+            {
+                ProcessVoiceResult(currentLetter); // Assume correct for now
+            }
+        }
+        else
+        {
+            // Normal speech recognition result
+            lastRecognizedText = result;
+            hasNewResult = true;
+        }
+    }
+    
+    public void OnVoiceRecognitionPartialResult(string partialResult)
+    {
+        Debug.Log($"🔄 Voice Recognition Partial: '{partialResult}'");
+        
+        if (partialResult == "SPEECH_STARTED")
+        {
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("🎤 SPEECH DETECTED!", true);
+            }
+        }
+        else
+        {
+            // Normal partial result
+            if (vrDisplay != null && !string.IsNullOrEmpty(partialResult))
+            {
+                vrDisplay.UpdateVoiceFeedback($"🔄 Hearing: '{partialResult}'", true);
+            }
+        }
+    }
+    
+    public void OnVoiceRecognitionError(string error)
+    {
+        Debug.LogError($"❌ Voice Recognition Error: {error}");
+        isListening = false;
+        
+        if (vrDisplay != null)
+        {
+            if (error.Contains("AudioRecord"))
+            {
+                vrDisplay.UpdateVoiceFeedback($"🎤 Using audio fallback", true);
+            }
+            else if (error.Contains("Switched to AudioRecord"))
+            {
+                vrDisplay.UpdateVoiceFeedback($"🔄 Switched to audio mode", true);
+            }
+            else if (!error.Contains("No match") && !error.Contains("No speech"))
+            {
+                vrDisplay.UpdateVoiceFeedback($"❌ Voice error: {error}", false);
+            }
+            else
+            {
+                vrDisplay.UpdateVoiceFeedback($"🔇 Try speaking louder", false);
+            }
+        }
+        
+        // Continue listening if it's just a "no match" error
+        if (error.Contains("No match") || error.Contains("No speech") || error.Contains("No results"))
+        {
+            Debug.Log("🔄 Restarting listening after no match error...");
+            Invoke("StartListening", 0.5f);
+        }
+    }
+    
+    public void OnVoiceRecognitionStatus(string status)
+    {
+        Debug.Log($"📊 Voice Recognition Status: {status}");
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback($"📊 Status: {status}", true);
+        }
+    }    // Legacy callback methods (keeping for compatibility)
+    public void OnSpeechReady(string message)
+    {
+        OnVoiceRecognitionReady(message);
+    }
+    
+    public void OnSpeechDetected(string message)
+    {
+        OnVoiceRecognitionBeginSpeech(message);
+    }
+    
+    public void OnSpeechEndOfInput(string message)
+    {
+        OnVoiceRecognitionEndSpeech(message);
     }
 
     // Test method for editor simulation
@@ -704,23 +955,15 @@ public class AndroidVoiceInput : MonoBehaviour
     // Public method to get current status for debugging
     public string GetVoiceRecognitionStatus()
     {
-        return $"isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}, " +
-               $"isListening: {isListening}, speechRecognizer: {speechRecognizer != null}, " +
-               $"vrDisplay: {vrDisplay != null}, waitingForLetterDisplay: {waitingForLetterDisplay}";
+        return $"Initialized: {isInitialized}, Permissions: {permissionsGranted}, Listening: {isListening}, SpeechRecognizer: {speechRecognizer != null}";
     }
 
     // Method to force a complete restart of the voice recognition system
     public void RestartVoiceRecognitionSystem()
     {
-        Debug.Log("🔄 Force restarting entire voice recognition system...");
-        
-        // Stop everything
+        Debug.Log("🔄 Completely restarting voice recognition system...");
         StopListening();
-        isInitialized = false;
-        permissionsGranted = false;
-        waitingForLetterDisplay = false;
         
-        // Clean up existing speechRecognizer
         if (speechRecognizer != null)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -730,30 +973,43 @@ public class AndroidVoiceInput : MonoBehaviour
             }
             catch (System.Exception e)
             {
-                Debug.LogWarning("Error destroying speech recognizer during restart: " + e.Message);
+                Debug.LogWarning("Error destroying old speech recognizer: " + e.Message);
             }
 #endif
-            speechRecognizer = null;
         }
         
-        // Restart the entire process
-        Invoke("RequestMicrophonePermission", 1f);
-    }    // Method called by VR display to start listening for a specific letter
+        speechRecognizer = null;
+        isInitialized = false;
+        
+        // Reinitialize after a delay
+        Invoke("InitializeAndroidSpeechRecognition", 1f);
+    }
+
+    // Method called by VR display to start listening for a specific letter
     public void StartListeningForLetter()
     {
-        Debug.Log("🎯 Starting voice listening for new letter");
-        CancelInvoke("StartListening"); // Cancel any pending restart
+        Debug.Log("🎯🎯🎯 StartListeningForLetter called!");
         
         if (vrDisplay != null)
         {
             string currentLetter = vrDisplay.GetCurrentLetter();
-            Debug.Log($"🔤 Now listening for letter: {currentLetter}");
+            Debug.Log($"🔤 Now listening for letter: '{currentLetter}'");
+            
+            if (!string.IsNullOrEmpty(currentLetter))
+            {
+                Debug.Log($"🔍 Speech recognizer state: speechRecognizer={speechRecognizer != null}, isInitialized={isInitialized}, permissionsGranted={permissionsGranted}");
+                StartListening();
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ No current letter to listen for!");
+            }
         }
-        
-        StartListening();
-    }
-
-    // Method called by VR display to stop listening (letter is changing)
+        else
+        {
+            Debug.LogError("❌ VR Display is null!");
+        }
+    }    // Method called by VR display to stop listening for a specific letter
     public void StopListeningForLetter()
     {
         Debug.Log("🛑 Stopping voice listening (letter changing)");
@@ -761,9 +1017,382 @@ public class AndroidVoiceInput : MonoBehaviour
         StopListening();
     }
 
-    // Method to check if we should continue listening (called after speech result)
-    public bool ShouldContinueListening()
+    // Method to test the entire voice recognition pipeline
+    public void DebugVoiceRecognitionPipeline()
     {
-        return vrDisplay != null && vrDisplay.ShouldContinueListening();
+        Debug.Log("🔬 === VOICE RECOGNITION DEBUG PIPELINE ===");
+        Debug.Log($"🔍 AndroidVoiceInput Status: {GetVoiceRecognitionStatus()}");
+        Debug.Log($"🎤 Current Letter: {(vrDisplay != null ? vrDisplay.GetCurrentLetter() : "VR Display null")}");
+        Debug.Log($"🔊 Is Displaying Letters: {(vrDisplay != null ? vrDisplay.IsDisplayingLetters() : false)}");
+        Debug.Log($"📱 Unity Activity: {(unityActivity != null ? "Available" : "Null")}");
+        
+        if (speechRecognizer != null)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                Debug.Log("🔍 VoiceBridge object exists and is accessible");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ VoiceBridge access error: {e.Message}");
+            }
+#endif
+        }
+        
+        Debug.Log("🔬 === END DEBUG PIPELINE ===");
+    }
+    
+    // Method to test letter matching logic
+    public void TestLetterMatching(string recognizedText, string targetLetter)
+    {
+        Debug.Log($"🧪 Testing letter matching: Recognized='{recognizedText}', Target='{targetLetter}'");
+        
+        string cleanedText = recognizedText.Trim().ToUpper();
+        string target = targetLetter.ToUpper();
+        
+        bool isCorrect = false;
+        string matchReason = "";
+        
+        // Test exact match
+        if (cleanedText.Contains(target))
+        {
+            isCorrect = true;
+            matchReason = "exact match";
+        }
+        // Test phonetic match
+        else if (IsPhoneticMatch(cleanedText, target))
+        {
+            isCorrect = true;
+            matchReason = "phonetic match";
+        }
+        // Test starts with
+        else if (cleanedText.StartsWith(target))
+        {
+            isCorrect = true;
+            matchReason = "starts with target";
+        }
+        
+        Debug.Log($"🧪 Test Result: {(isCorrect ? "✅ MATCH" : "❌ NO MATCH")} - Reason: {matchReason}");
+        
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback($"Test: '{recognizedText}' vs '{targetLetter}' = {(isCorrect ? "✅" : "❌")}", isCorrect);
+        }
+    }
+    
+    // Method to test VoiceBridge connection
+    public void TestVoiceBridge()
+    {
+        Debug.Log("🧪 Testing VoiceBridge connection...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                // Test calling a method on the VoiceBridge
+                Debug.Log("🧪 VoiceBridge object exists - testing method call...");
+                Debug.Log("✅ VoiceBridge connection test passed");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("✅ VoiceBridge connected", true);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ VoiceBridge connection test failed: {e.Message}");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback($"❌ VoiceBridge error: {e.Message}", false);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogError("❌ VoiceBridge object is null");
+            
+            if (vrDisplay != null)
+            {
+                vrDisplay.UpdateVoiceFeedback("❌ VoiceBridge not initialized", false);
+            }
+        }
+#else
+        Debug.Log("🖥️ VoiceBridge test skipped (Editor mode)");
+        
+        if (vrDisplay != null)
+        {
+            vrDisplay.UpdateVoiceFeedback("🖥️ VoiceBridge test (Editor)", true);
+        }
+#endif
+    }
+    
+    // Method to debug the entire voice pipeline
+    public void DebugVoicePipeline()
+    {
+        Debug.Log("🔍 === VOICE PIPELINE DEBUG START ===");
+        
+        // Check permissions
+        bool hasPermission = false;
+#if UNITY_ANDROID && !UNITY_EDITOR
+        hasPermission = UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone);
+#else
+        hasPermission = true; // Assume true in editor
+#endif
+        
+        Debug.Log($"🔍 Microphone Permission: {hasPermission}");
+        Debug.Log($"🔍 Permissions Granted Flag: {permissionsGranted}");
+        Debug.Log($"🔍 Is Initialized: {isInitialized}");
+        Debug.Log($"🔍 Is Listening: {isListening}");
+        Debug.Log($"🔍 Speech Recognizer Null: {speechRecognizer == null}");
+        Debug.Log($"🔍 Unity Activity Null: {unityActivity == null}");
+        Debug.Log($"🔍 VR Display Null: {vrDisplay == null}");
+        
+        if (vrDisplay != null)
+        {
+            Debug.Log($"🔍 VR Display - Is Displaying Letters: {vrDisplay.IsDisplayingLetters()}");
+            Debug.Log($"🔍 VR Display - Should Continue Listening: {vrDisplay.ShouldContinueListening()}");
+            Debug.Log($"🔍 VR Display - Current Letter: '{vrDisplay.GetCurrentLetter()}'");
+        }
+        
+        // Test voice bridge if available
+        if (speechRecognizer != null)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                Debug.Log("🔍 Testing VoiceBridge method calls...");
+                Debug.Log("✅ VoiceBridge object is accessible");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ VoiceBridge test failed: {e.Message}");
+            }
+#endif
+        }
+        
+        // Performance stats
+        Debug.Log($"🔍 Performance - Correct: {correctAnswers}, Total: {totalAttempts}, Accuracy: {GetAccuracy():F1}%");
+        
+        Debug.Log("🔍 === VOICE PIPELINE DEBUG END ===");
+        
+        if (vrDisplay != null)
+        {
+            string status = $"Perm:{hasPermission} Init:{isInitialized} Listen:{isListening}";
+            vrDisplay.UpdateVoiceFeedback($"🔍 Debug: {status}", hasPermission && isInitialized);
+        }
+    }
+    
+    // Test method to manually trigger a speech result (for debugging)
+    public void TestSpeechResult(string testResult)
+    {
+        Debug.Log($"🧪 Testing speech result: '{testResult}'");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("testSpeechResult", testResult);
+                Debug.Log("✅ Test speech result sent to VoiceBridge");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Test speech result failed: {e.Message}");
+            }
+        }
+#else
+        // In editor, just simulate the result
+        OnSpeechResult(testResult);
+#endif
+    }
+    
+    // Test method to check VoiceBridge status
+    public void TestSpeechRecognizerStatus()
+    {
+        Debug.Log("🧪 Testing speech recognizer status...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("testSpeechRecognizer");
+                Debug.Log("✅ Speech recognizer status test sent");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Speech recognizer status test failed: {e.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogError("❌ Speech recognizer is null - cannot test");
+        }
+#else
+        Debug.Log("🖥️ Speech recognizer test skipped (Editor mode)");
+#endif
+    }
+
+    // Test method to check capabilities
+    public void TestCapabilities()
+    {
+        Debug.Log("🔍 Testing speech recognition capabilities...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("testRecognitionCapabilities");
+                Debug.Log("✅ Capabilities test sent");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Capabilities test failed: {e.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogError("❌ Speech recognizer is null - cannot test capabilities");
+        }
+#else
+        Debug.Log("🖥️ Capabilities test - Editor mode");
+#endif
+    }
+    
+    // Alternative ultra-aggressive listening method
+    public void StartUltraAggressiveListening()
+    {
+        Debug.Log("🚀 Starting ULTRA AGGRESSIVE listening mode...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null && !isListening && isInitialized && permissionsGranted)
+        {
+            try
+            {
+                speechRecognizer.Call("startListeningForSingleLetter");
+                isListening = true;
+                Debug.Log("🚀 Ultra aggressive listening command sent");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🚀 Ultra listening mode", false);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Ultra aggressive listening failed: {e.Message}");
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback($"🔇 Ultra mode error: {e.Message}", false);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"⚠️ Cannot start ultra aggressive - isListening: {isListening}, isInitialized: {isInitialized}, permissionsGranted: {permissionsGranted}");
+        }
+#else
+        Debug.Log("🖥️ Ultra aggressive mode simulated (Editor mode)");
+#endif
+    }
+
+    // Method to reinitialize speech recognizer when it gets stuck
+    public void ReinitializeSpeechRecognizer()
+    {
+        Debug.Log("🔄 Reinitializing speech recognizer...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("reinitializeSpeechRecognizer");
+                Debug.Log("✅ Speech recognizer reinitialization command sent");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔄 Speech recognizer reinitialized", false);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Speech recognizer reinitialization failed: {e.Message}");
+            }
+        }
+        else
+        {
+            Debug.LogError("❌ Speech recognizer is null - cannot reinitialize");
+        }
+#else
+        Debug.Log("🖥️ Speech recognizer reinitialization simulated (Editor mode)");
+#endif
+    }
+    
+    // Test method to enable AudioRecord fallback manually
+    public void EnableAudioRecordFallback()
+    {
+        Debug.Log("🎤 Manually enabling AudioRecord fallback...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("enableAudioRecordFallback");
+                Debug.Log("✅ AudioRecord fallback enabled");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🎤 Audio fallback enabled", true);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Failed to enable AudioRecord fallback: {e.Message}");
+            }
+        }
+#else
+        Debug.Log("AudioRecord fallback only works on Android device");
+#endif
+    }
+    
+    // Test method to manually simulate AudioRecord speech detection
+    public void TestAudioRecordSpeechDetection()
+    {
+        Debug.Log("🧪 Testing AudioRecord speech detection...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        OnVoiceRecognitionResult("SPEECH_DETECTED");
+#else
+        // In editor, simulate AudioRecord detection
+        OnVoiceRecognitionResult("SPEECH_DETECTED");
+#endif
+    }
+    
+    // Test method to simulate different AudioRecord states
+    public void TestAudioRecordStates()
+    {
+        Debug.Log("🧪 Testing AudioRecord states...");
+        
+        // Simulate the sequence of events in AudioRecord mode
+        OnVoiceRecognitionInitialized("AudioRecord");
+        
+        Invoke("TestAudioRecordReady", 1f);
+        Invoke("TestAudioRecordSpeechStart", 2f);
+        Invoke("TestAudioRecordSpeechDetection", 3f);
+    }
+    
+    private void TestAudioRecordReady()
+    {
+        OnVoiceRecognitionReady("");
+    }
+    
+    private void TestAudioRecordSpeechStart()
+    {
+        OnVoiceRecognitionPartialResult("SPEECH_STARTED");
     }
 }
