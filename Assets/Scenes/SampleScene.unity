@@ -424,6 +424,7 @@ MonoBehaviour:
   recognitionTimeout: 3
   confidenceThreshold: 0.5
   logAllResults: 1
+  useAudioRecordFallback: 1
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

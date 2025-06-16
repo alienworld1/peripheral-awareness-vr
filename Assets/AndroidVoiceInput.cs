@@ -4,11 +4,14 @@ using System;
 using System.Collections.Generic;
 
 public class AndroidVoiceInput : MonoBehaviour
-{
-    [Header("Voice Recognition Settings")]
+{    [Header("Voice Recognition Settings")]
     public float recognitionTimeout = 3f;
     public float confidenceThreshold = 0.5f;
     public bool logAllResults = true;
+    
+    [Header("AudioRecord Fallback")]
+    [Tooltip("Enable AudioRecord fallback for better single-letter detection. Check this if speech recognition isn't working.")]
+    public bool useAudioRecordFallback = false;
     
     private bool isListening = false;
     private string filePath;
@@ -27,6 +30,8 @@ public class AndroidVoiceInput : MonoBehaviour
     // Performance tracking
     private int correctAnswers = 0;
     private int totalAttempts = 0;
+
+    private bool lastAudioRecordFallbackSetting = false;
 
     void Start()
     {
@@ -47,6 +52,23 @@ public class AndroidVoiceInput : MonoBehaviour
         RequestMicrophonePermission();
     }    void Update()
     {
+        // Monitor for changes to the AudioRecord fallback setting
+        if (useAudioRecordFallback != lastAudioRecordFallbackSetting)
+        {
+            lastAudioRecordFallbackSetting = useAudioRecordFallback;
+            
+            if (useAudioRecordFallback && isInitialized)
+            {
+                Debug.Log("🎤 AudioRecord fallback enabled via Inspector - applying immediately");
+                EnableAudioRecordFallback();
+            }
+            else if (!useAudioRecordFallback && isInitialized)
+            {
+                Debug.Log("🔄 AudioRecord fallback disabled via Inspector - reinitializing standard mode");
+                ReinitializeSpeechRecognizer();
+            }
+        }
+        
         // Process voice recognition results
         if (hasNewResult && !string.IsNullOrEmpty(lastRecognizedText))
         {
@@ -85,15 +107,16 @@ public class AndroidVoiceInput : MonoBehaviour
                 
                 // Create our VoiceBridge plugin
                 speechRecognizer = new AndroidJavaObject("com.unity3d.player.VoiceBridge", unityActivity, gameObject.name);
-                
-                if (speechRecognizer != null)
-                {
-                    isInitialized = true;
+                  if (speechRecognizer != null)
+                {                    isInitialized = true;
                     Debug.Log("✅ Voice recognition initialized successfully with VoiceBridge");
                     
-                    // Test speech recognition capabilities
-                    Debug.Log("🔍 Testing speech recognition capabilities...");
-                    speechRecognizer.Call("testRecognitionCapabilities");
+                    // Check if AudioRecord fallback should be enabled from the start
+                    if (useAudioRecordFallback)
+                    {
+                        Debug.Log("🎤 AudioRecord fallback enabled via Unity Inspector setting");
+                        EnableAudioRecordFallback();
+                    }
                     
                     if (vrDisplay != null)
                     {
@@ -877,8 +900,7 @@ public class AndroidVoiceInput : MonoBehaviour
             }
         }
     }
-    
-    public void OnVoiceRecognitionError(string error)
+      public void OnVoiceRecognitionError(string error)
     {
         Debug.LogError($"❌ Voice Recognition Error: {error}");
         isListening = false;
@@ -903,7 +925,15 @@ public class AndroidVoiceInput : MonoBehaviour
             }
         }
         
-        // Continue listening if it's just a "no match" error
+        // If we get "No match" but detected audio, switch to AudioRecord fallback
+        if (error.Contains("No match") && error.Contains("detected audio: true"))
+        {
+            Debug.Log("🎤 SpeechRecognizer detected audio but no match - enabling AudioRecord fallback");
+            EnableAudioRecordFallback();
+            return; // Don't restart normal listening
+        }
+        
+        // Continue listening if it's just a "no match" error without audio detection
         if (error.Contains("No match") || error.Contains("No speech") || error.Contains("No results"))
         {
             Debug.Log("🔄 Restarting listening after no match error...");
@@ -950,12 +980,10 @@ public class AndroidVoiceInput : MonoBehaviour
         Debug.Log("🔄 Force restarting voice recognition...");
         StopListening();
         Invoke("StartListening", 1f);
-    }
-
-    // Public method to get current status for debugging
+    }    // Public method to get current status for debugging
     public string GetVoiceRecognitionStatus()
     {
-        return $"Initialized: {isInitialized}, Permissions: {permissionsGranted}, Listening: {isListening}, SpeechRecognizer: {speechRecognizer != null}";
+        return $"Initialized: {isInitialized}, Permissions: {permissionsGranted}, Listening: {isListening}, SpeechRecognizer: {speechRecognizer != null}, AudioRecord Fallback: {useAudioRecordFallback}";
     }
 
     // Method to force a complete restart of the voice recognition system

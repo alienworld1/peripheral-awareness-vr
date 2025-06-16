@@ -564,21 +564,25 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
             Debug.Log("📢 Notifying voice input that letters are ready");
             voiceInput.OnLettersReady();
         }
-    }
-
-    // Method to show voice recognition debug status
-    public void ShowVoiceStatus()
+    }    // Method to show voice recognition debug status
+    private void ShowVoiceStatus()
     {
         if (voiceInput != null)
         {
             string status = voiceInput.GetVoiceRecognitionStatus();
-            UpdateVoiceFeedback($"🔍 Voice Status: {status}", false);
-            Debug.Log($"🔍 Voice Recognition Status: {status}");
+            Debug.Log($"🔍 Voice Status: {status}");
+            UpdateVoiceFeedback($"Status: {status}", true);
+            
+            // Show AudioRecord fallback information
+            bool audioRecordEnabled = voiceInput.useAudioRecordFallback;
+            string fallbackInfo = audioRecordEnabled ? "AudioRecord fallback: ENABLED" : "AudioRecord fallback: DISABLED - Enable in Inspector if speech recognition fails";
+            Debug.Log($"💡 {fallbackInfo}");
+            UpdateVoiceFeedback($"💡 {fallbackInfo}", true);
         }
         else
         {
-            UpdateVoiceFeedback("🔇 Voice input not found", false);
-            Debug.LogWarning("🔇 Voice input component not found");
+            Debug.Log("❌ Voice input component not found");
+            UpdateVoiceFeedback("❌ Voice input not found", false);
         }
     }
 
