@@ -32,8 +32,7 @@ public class VoiceBridge {
     private static final long MAX_LISTENING_TIME = 5500; // 5.5 seconds in milliseconds
     private boolean hasDetectedAudio = false;
     private int consecutiveAudioSamples = 0;
-    
-    // AudioRecord fallback variables
+      // AudioRecord fallback variables
     private AudioRecord audioRecord;
     private boolean isRecording = false;
     private Thread recordingThread;
@@ -49,6 +48,13 @@ public class VoiceBridge {
     private int speechDetectionThreshold = 1000; // Amplitude threshold for speech detection
     private int consecutiveSpeechSamples = 0;
     private int requiredSpeechSamples = 10; // Number of consecutive samples above threshold to confirm speech
+    
+    // Audio analysis for letter recognition
+    private java.util.List<Double> audioSamples = new java.util.ArrayList<>();
+    private String targetLetter = "";
+    private double speechDuration = 0;
+    private double averageAmplitude = 0;
+    private int speechSampleCount = 0;
     
     public VoiceBridge(Context context, String gameObjectName) {
         this.context = context;
@@ -228,14 +234,19 @@ public class VoiceBridge {
             Log.w(TAG, "Already recording with AudioRecord");
             return;
         }
-        
-        Log.d(TAG, "Starting AudioRecord...");
+          Log.d(TAG, "Starting AudioRecord...");
         isListening = true;
         isRecording = true;
         audioRecordStartTime = System.currentTimeMillis();
         hasDetectedSpeech = false;
         peakAmplitude = 0;
         consecutiveSpeechSamples = 0;
+        
+        // Reset audio analysis variables
+        audioSamples.clear();
+        speechDuration = 0;
+        averageAmplitude = 0;
+        speechSampleCount = 0;
         
         try {
             audioRecord.startRecording();
@@ -246,8 +257,7 @@ public class VoiceBridge {
                     processAudioData();
                 }
             });
-            recordingThread.start();
-              // Timeout after MAX_LISTENING_TIME
+            recordingThread.start();            // Timeout after MAX_LISTENING_TIME
             mainHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -255,12 +265,14 @@ public class VoiceBridge {
                         Log.d(TAG, "AudioRecord timeout reached");
                         stopAudioRecording();
                         
-                        // Only send result if speech hasn't been detected already
-                        if (!hasDetectedSpeech) {
+                        // If we detected speech but haven't analyzed yet, analyze now
+                        if (hasDetectedSpeech && speechSampleCount > 0) {
+                            Log.d(TAG, "Timeout reached but speech was detected - analyzing");
+                            speechDuration = speechSampleCount * (1000.0 / SAMPLE_RATE) * (bufferSize / 2);
+                            analyzeAudioForLetter();
+                        } else {
                             Log.d(TAG, "No speech detected during recording");
                             UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionError", "No speech detected");
-                        } else {
-                            Log.d(TAG, "Speech was already detected and reported");
                         }
                     }
                 }
@@ -293,28 +305,38 @@ public class VoiceBridge {
                 // Track peak amplitude
                 if (rmsAmplitude > peakAmplitude) {
                     peakAmplitude = rmsAmplitude;
-                }
-                  // Check if amplitude exceeds speech threshold
+                }                // Check if amplitude exceeds speech threshold
                 if (rmsAmplitude > speechDetectionThreshold) {
                     consecutiveSpeechSamples++;
+                    
+                    // Collect audio samples for analysis while speech is detected
+                    audioSamples.add(rmsAmplitude);
+                    speechSampleCount++;
+                    averageAmplitude = (averageAmplitude * (speechSampleCount - 1) + rmsAmplitude) / speechSampleCount;
+                    
                     if (consecutiveSpeechSamples >= requiredSpeechSamples && !hasDetectedSpeech) {
                         hasDetectedSpeech = true;
                         Log.d(TAG, "Speech detected! RMS: " + rmsAmplitude + ", Peak: " + peakAmplitude);
-                        
-                        // Stop recording immediately and send result
+                        Log.d(TAG, "Continuing to record for audio analysis...");
+                    }
+                } else {
+                    // If we had speech and now it's quiet, analyze what we collected
+                    if (hasDetectedSpeech && speechSampleCount > 0) {
+                        Log.d(TAG, "Speech ended, analyzing collected audio...");
                         stopAudioRecording();
                         
-                        // Notify Unity immediately when speech is detected
+                        // Calculate speech duration
+                        speechDuration = speechSampleCount * (1000.0 / SAMPLE_RATE) * (bufferSize / 2);
+                        
+                        // Analyze the collected audio
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
-                                Log.d(TAG, "Sending SPEECH_DETECTED to Unity immediately");
-                                UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionResult", "SPEECH_DETECTED");
+                                analyzeAudioForLetter();
                             }
                         });
                         break; // Exit the recording loop
                     }
-                } else {
                     consecutiveSpeechSamples = 0;
                 }
                 
@@ -551,6 +573,11 @@ public class VoiceBridge {
         UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionStatus", settings);
     }
 
+    public void setTargetLetter(String letter) {
+        this.targetLetter = letter.toUpperCase();
+        Log.d(TAG, "Target letter set to: " + this.targetLetter);
+    }
+    
     private class VoiceRecognitionListener implements RecognitionListener {
         @Override
         public void onReadyForSpeech(Bundle params) {
@@ -680,7 +707,82 @@ public class VoiceBridge {
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
                 return "No speech input";
             default:
-                return "Unknown error (" + errorCode + ")";
+                return "Unknown error (" + errorCode + ")";        }
+    }
+    
+    private void analyzeAudioForLetter() {
+        Log.d(TAG, "Analyzing audio for letter: " + targetLetter);
+        Log.d(TAG, "Speech duration: " + speechDuration + "ms, Average amplitude: " + averageAmplitude + ", Peak: " + peakAmplitude);
+        
+        if (audioSamples.isEmpty() || targetLetter.isEmpty()) {
+            Log.w(TAG, "No audio data or target letter for analysis");
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionError", "No speech detected");
+            return;
+        }
+        
+        boolean isCorrect = false;
+        String analysisReason = "";
+        
+        // Basic letter classification based on acoustic properties
+        char letter = targetLetter.charAt(0);
+        
+        // Vowels vs Consonants analysis
+        boolean isVowel = "AEIOU".contains(String.valueOf(letter));
+        
+        if (isVowel) {
+            // Vowels tend to have:
+            // - Longer duration
+            // - More consistent amplitude
+            // - Higher average amplitude
+            if (speechDuration > 300 && averageAmplitude > speechDetectionThreshold * 1.2) {
+                isCorrect = true;
+                analysisReason = "vowel-like characteristics";
+            }
+        } else {
+            // Consonants analysis by groups
+            if ("BCDFGHJKLMNPQRSTVWXYZ".contains(String.valueOf(letter))) {
+                // Different consonant groups have different patterns
+                if ("BPTKDG".contains(String.valueOf(letter))) {
+                    // Plosives - short burst, high peak
+                    if (speechDuration < 400 && peakAmplitude > speechDetectionThreshold * 1.5) {
+                        isCorrect = true;
+                        analysisReason = "plosive-like characteristics";
+                    }
+                } else if ("FVSZH".contains(String.valueOf(letter))) {
+                    // Fricatives - longer, sustained
+                    if (speechDuration > 200 && speechDuration < 600) {
+                        isCorrect = true;
+                        analysisReason = "fricative-like characteristics";
+                    }
+                } else if ("MNLR".contains(String.valueOf(letter))) {
+                    // Liquids/Nasals - medium duration, consistent amplitude
+                    if (speechDuration > 250 && speechDuration < 500) {
+                        isCorrect = true;
+                        analysisReason = "liquid/nasal-like characteristics";
+                    }
+                } else {
+                    // Other consonants - general pattern
+                    if (speechDuration > 150 && speechDuration < 800) {
+                        isCorrect = true;
+                        analysisReason = "consonant-like characteristics";
+                    }
+                }
+            }
+        }
+        
+        // Fallback: if we detected clear speech, give benefit of doubt
+        if (!isCorrect && speechSampleCount > 20 && averageAmplitude > speechDetectionThreshold) {
+            isCorrect = true;
+            analysisReason = "clear speech detected";
+        }
+        
+        Log.d(TAG, "Audio analysis result: " + (isCorrect ? "CORRECT" : "INCORRECT") + " (" + analysisReason + ")");
+        
+        // Send result to Unity
+        if (isCorrect) {
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionResult", targetLetter);
+        } else {
+            UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionError", "Speech doesn't match " + targetLetter);
         }
     }
 }

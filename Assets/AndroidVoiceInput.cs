@@ -16,17 +16,16 @@ public class AndroidVoiceInput : MonoBehaviour
     private bool isListening = false;
     private string filePath;
     private AndroidJavaObject speechRecognizer;
-    private AndroidJavaObject unityActivity;
-    private AndroidJavaObject recognitionListener;
+    private AndroidJavaObject unityActivity;    private AndroidJavaObject recognitionListener;
     private SimpleVRGoggleDisplay vrDisplay;
     private bool isInitialized = false;
     private bool permissionsGranted = false;
-    private bool waitingForLetterDisplay = false;
-      // Voice recognition results
+    private bool waitingForLetterDisplay = false;    // Voice recognition results
     private string lastRecognizedText = "";
     private bool hasNewResult = false;
     private string currentListeningLetter = ""; // Track which letter we're currently listening for
-      // Performance tracking
+    
+    // Performance tracking
     private int correctAnswers = 0;
     private int totalAttempts = 0;
 
@@ -66,7 +65,8 @@ public class AndroidVoiceInput : MonoBehaviour
                 Debug.Log("🔄 AudioRecord fallback disabled via Inspector - reinitializing standard mode");
                 ReinitializeSpeechRecognizer();
             }
-        }        
+        }
+        
         // Process voice recognition results
         if (hasNewResult && !string.IsNullOrEmpty(lastRecognizedText))
         {
@@ -176,6 +176,14 @@ public class AndroidVoiceInput : MonoBehaviour
             try
             {
                 Debug.Log("🎤 Attempting to start voice recognition...");
+                
+                // Set the target letter for AudioRecord analysis
+                if (!string.IsNullOrEmpty(currentListeningLetter))
+                {
+                    speechRecognizer.Call("setTargetLetter", currentListeningLetter);
+                    Debug.Log($"🎯 Target letter set to: {currentListeningLetter}");
+                }
+                
                 speechRecognizer.Call("startListening");
                 isListening = true;
                 
@@ -851,46 +859,54 @@ public class AndroidVoiceInput : MonoBehaviour
         {
             vrDisplay.UpdateVoiceFeedback("🔄 Processing...", true);
         }
-    }
-      public void OnVoiceRecognitionResult(string result)
+    }    public void OnVoiceRecognitionResult(string result)
     {
-        Debug.Log($"✅ Voice Recognition Result: '{result}'");        // Handle special AudioRecord results
-        if (result == "SPEECH_DETECTED")
+        Debug.Log($"✅ Voice Recognition Result: '{result}'");
+        
+        // Check if it's a single letter from AudioRecord analysis
+        if (!string.IsNullOrEmpty(result) && result.Length == 1 && char.IsLetter(result[0]))
         {
-            // AudioRecord detected speech but can't transcribe it
-            // Use the letter we were listening for when recording started
+            // This is a letter result from AudioRecord analysis
             string targetLetter = currentListeningLetter;
             
-            Debug.Log($"🎤 AudioRecord detected speech for letter: {targetLetter}");
+            Debug.Log($"🎤 AudioRecord analyzed speech as letter: '{result}' (target was '{targetLetter}')");
             
             if (!string.IsNullOrEmpty(targetLetter))
             {
-                // Since the user clearly spoke something (AudioRecord detected it), 
-                // and they're looking at the target letter, assume they said it correctly
-                Debug.Log($"✅ AudioRecord detected speech for '{targetLetter}' - treating as correct");
+                bool isCorrect = result.ToUpper() == targetLetter.ToUpper();
                 
-                if (vrDisplay != null)
+                if (isCorrect)
                 {
-                    vrDisplay.UpdateVoiceFeedback($"✅ Speech detected for '{targetLetter}' - Correct!", true);
+                    Debug.Log($"✅ AudioRecord analysis: '{result}' matches target '{targetLetter}' - Correct!");
+                    if (vrDisplay != null)
+                    {
+                        vrDisplay.UpdateVoiceFeedback($"✅ Heard '{result}' - Correct!", true);
+                    }
+                }
+                else
+                {
+                    Debug.Log($"❌ AudioRecord analysis: '{result}' doesn't match target '{targetLetter}' - Incorrect");
+                    if (vrDisplay != null)
+                    {
+                        vrDisplay.UpdateVoiceFeedback($"❌ Heard '{result}', expected '{targetLetter}' - Try again", false);
+                    }
                 }
                 
-                // Process as correct answer
-                ProcessVoiceResult(targetLetter);
+                // Process the result
+                ProcessVoiceResult(result);
             }
             else
             {
-                Debug.LogWarning("⚠️ AudioRecord detected speech but no current letter is available!");
+                Debug.LogWarning("⚠️ AudioRecord analysis completed but no current target letter!");
             }
         }
         else
         {
-            // Normal speech recognition result
+            // Normal speech recognition result or other message
             lastRecognizedText = result;
             hasNewResult = true;
         }
-    }
-    
-    public void OnVoiceRecognitionPartialResult(string partialResult)
+    }public void OnVoiceRecognitionPartialResult(string partialResult)
     {
         Debug.Log($"🔄 Voice Recognition Partial: '{partialResult}'");
         
@@ -1537,5 +1553,4 @@ public class AndroidVoiceInput : MonoBehaviour
 #else
         Debug.Log("🖥️ AudioRecord threshold adjustment simulated (Editor mode)");
 #endif
-    }
-}
+    }}
