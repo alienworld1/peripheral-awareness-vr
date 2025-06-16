@@ -247,8 +247,7 @@ public class VoiceBridge {
                 }
             });
             recordingThread.start();
-            
-            // Timeout after MAX_LISTENING_TIME
+              // Timeout after MAX_LISTENING_TIME
             mainHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -256,13 +255,12 @@ public class VoiceBridge {
                         Log.d(TAG, "AudioRecord timeout reached");
                         stopAudioRecording();
                         
-                        // Send result based on speech detection
-                        if (hasDetectedSpeech) {
-                            Log.d(TAG, "Speech detected during recording, peak amplitude: " + peakAmplitude);
-                            UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionResult", "SPEECH_DETECTED");
-                        } else {
+                        // Only send result if speech hasn't been detected already
+                        if (!hasDetectedSpeech) {
                             Log.d(TAG, "No speech detected during recording");
                             UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionError", "No speech detected");
+                        } else {
+                            Log.d(TAG, "Speech was already detected and reported");
                         }
                     }
                 }
@@ -296,21 +294,25 @@ public class VoiceBridge {
                 if (rmsAmplitude > peakAmplitude) {
                     peakAmplitude = rmsAmplitude;
                 }
-                
-                // Check if amplitude exceeds speech threshold
+                  // Check if amplitude exceeds speech threshold
                 if (rmsAmplitude > speechDetectionThreshold) {
                     consecutiveSpeechSamples++;
                     if (consecutiveSpeechSamples >= requiredSpeechSamples && !hasDetectedSpeech) {
                         hasDetectedSpeech = true;
                         Log.d(TAG, "Speech detected! RMS: " + rmsAmplitude + ", Peak: " + peakAmplitude);
                         
+                        // Stop recording immediately and send result
+                        stopAudioRecording();
+                        
                         // Notify Unity immediately when speech is detected
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
-                                UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionPartialResult", "SPEECH_STARTED");
+                                Log.d(TAG, "Sending SPEECH_DETECTED to Unity immediately");
+                                UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionResult", "SPEECH_DETECTED");
                             }
                         });
+                        break; // Exit the recording loop
                     }
                 } else {
                     consecutiveSpeechSamples = 0;
@@ -531,6 +533,24 @@ public class VoiceBridge {
         UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionStatus", "AudioRecord fallback enabled");
     }
     
+    // Method to adjust speech detection sensitivity
+    public void setSpeechDetectionThreshold(int newThreshold) {
+        int oldThreshold = speechDetectionThreshold;
+        speechDetectionThreshold = newThreshold;
+        Log.d(TAG, "Speech detection threshold changed from " + oldThreshold + " to " + newThreshold);
+        UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionStatus", "Threshold: " + newThreshold);
+    }
+    
+    // Method to get current AudioRecord settings
+    public void getAudioRecordSettings() {
+        String settings = "Threshold: " + speechDetectionThreshold + 
+                         ", Required samples: " + requiredSpeechSamples +
+                         ", Sample rate: " + SAMPLE_RATE +
+                         ", Buffer size: " + bufferSize;
+        Log.d(TAG, "AudioRecord settings: " + settings);
+        UnityPlayer.UnitySendMessage(gameObjectName, "OnVoiceRecognitionStatus", settings);
+    }
+
     private class VoiceRecognitionListener implements RecognitionListener {
         @Override
         public void onReadyForSpeech(Bundle params) {

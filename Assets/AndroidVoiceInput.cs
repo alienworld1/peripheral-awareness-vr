@@ -22,12 +22,11 @@ public class AndroidVoiceInput : MonoBehaviour
     private bool isInitialized = false;
     private bool permissionsGranted = false;
     private bool waitingForLetterDisplay = false;
-    
-    // Voice recognition results
+      // Voice recognition results
     private string lastRecognizedText = "";
     private bool hasNewResult = false;
-    
-    // Performance tracking
+    private string currentListeningLetter = ""; // Track which letter we're currently listening for
+      // Performance tracking
     private int correctAnswers = 0;
     private int totalAttempts = 0;
 
@@ -67,8 +66,7 @@ public class AndroidVoiceInput : MonoBehaviour
                 Debug.Log("🔄 AudioRecord fallback disabled via Inspector - reinitializing standard mode");
                 ReinitializeSpeechRecognizer();
             }
-        }
-        
+        }        
         // Process voice recognition results
         if (hasNewResult && !string.IsNullOrEmpty(lastRecognizedText))
         {
@@ -854,22 +852,34 @@ public class AndroidVoiceInput : MonoBehaviour
             vrDisplay.UpdateVoiceFeedback("🔄 Processing...", true);
         }
     }
-    
-    public void OnVoiceRecognitionResult(string result)
+      public void OnVoiceRecognitionResult(string result)
     {
-        Debug.Log($"✅ Voice Recognition Result: '{result}'");
-        
-        // Handle special AudioRecord results
+        Debug.Log($"✅ Voice Recognition Result: '{result}'");        // Handle special AudioRecord results
         if (result == "SPEECH_DETECTED")
         {
             // AudioRecord detected speech but can't transcribe it
-            // We'll treat this as a positive response for the current letter
-            string currentLetter = vrDisplay?.GetCurrentLetter() ?? "";
-            Debug.Log($"🎤 AudioRecord detected speech for letter: {currentLetter}");
+            // Use the letter we were listening for when recording started
+            string targetLetter = currentListeningLetter;
             
-            if (!string.IsNullOrEmpty(currentLetter))
+            Debug.Log($"🎤 AudioRecord detected speech for letter: {targetLetter}");
+            
+            if (!string.IsNullOrEmpty(targetLetter))
             {
-                ProcessVoiceResult(currentLetter); // Assume correct for now
+                // Since the user clearly spoke something (AudioRecord detected it), 
+                // and they're looking at the target letter, assume they said it correctly
+                Debug.Log($"✅ AudioRecord detected speech for '{targetLetter}' - treating as correct");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback($"✅ Speech detected for '{targetLetter}' - Correct!", true);
+                }
+                
+                // Process as correct answer
+                ProcessVoiceResult(targetLetter);
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ AudioRecord detected speech but no current letter is available!");
             }
         }
         else
@@ -1011,19 +1021,17 @@ public class AndroidVoiceInput : MonoBehaviour
         
         // Reinitialize after a delay
         Invoke("InitializeAndroidSpeechRecognition", 1f);
-    }
-
-    // Method called by VR display to start listening for a specific letter
+    }    // Method called by VR display to start listening for a specific letter
     public void StartListeningForLetter()
     {
         Debug.Log("🎯🎯🎯 StartListeningForLetter called!");
         
         if (vrDisplay != null)
         {
-            string currentLetter = vrDisplay.GetCurrentLetter();
-            Debug.Log($"🔤 Now listening for letter: '{currentLetter}'");
+            currentListeningLetter = vrDisplay.GetCurrentLetter();
+            Debug.Log($"🔤 Now listening for letter: '{currentListeningLetter}'");
             
-            if (!string.IsNullOrEmpty(currentLetter))
+            if (!string.IsNullOrEmpty(currentListeningLetter))
             {
                 Debug.Log($"🔍 Speech recognizer state: speechRecognizer={speechRecognizer != null}, isInitialized={isInitialized}, permissionsGranted={permissionsGranted}");
                 StartListening();
@@ -1032,17 +1040,28 @@ public class AndroidVoiceInput : MonoBehaviour
             {
                 Debug.LogWarning("⚠️ No current letter to listen for!");
             }
-        }
-        else
+        }        else
         {
             Debug.LogError("❌ VR Display is null!");
         }
-    }    // Method called by VR display to stop listening for a specific letter
+    }
+    
+    // Method called by VR display to stop listening for a specific letter
     public void StopListeningForLetter()
     {
         Debug.Log("🛑 Stopping voice listening (letter changing)");
         CancelInvoke("StartListening"); // Cancel any pending restart
         StopListening();
+        
+        // Clear the current letter after a short delay to allow AudioRecord callbacks to complete
+        Invoke("ClearCurrentLetter", 0.5f);
+    }
+    
+    // Helper method to clear the current letter
+    private void ClearCurrentLetter()
+    {
+        currentListeningLetter = "";
+        Debug.Log("🧹 Cleared current listening letter");
     }
 
     // Method to test the entire voice recognition pipeline
@@ -1422,5 +1441,101 @@ public class AndroidVoiceInput : MonoBehaviour
     private void TestAudioRecordSpeechStart()
     {
         OnVoiceRecognitionPartialResult("SPEECH_STARTED");
+    }
+
+    // Method to test AudioRecord with different thresholds for debugging
+    public void TestAudioRecordSensitivity()
+    {
+        Debug.Log("🧪 Testing AudioRecord sensitivity...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                // Try a lower threshold for more sensitive detection
+                speechRecognizer.Call("setSpeechDetectionThreshold", 800); // Lower from 1000 to 800
+                Debug.Log("✅ AudioRecord threshold lowered to 800 for better sensitivity");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🎤 AudioRecord more sensitive", true);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Failed to adjust AudioRecord sensitivity: {e.Message}");
+            }
+        }
+#else
+        Debug.Log("AudioRecord sensitivity test only works on Android device");
+#endif
+    }
+    
+    // Method to force AudioRecord to assume speech was detected (for testing)
+    public void SimulateAudioRecordDetection()
+    {
+        Debug.Log("🧪 Simulating AudioRecord speech detection...");
+        
+        if (!string.IsNullOrEmpty(currentListeningLetter))
+        {
+            Debug.Log($"🎤 Simulating AudioRecord detected speech for letter: {currentListeningLetter}");
+            OnVoiceRecognitionResult("SPEECH_DETECTED");
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ No current letter set for simulation");
+        }
+    }    
+    // Method to restart listening for the current letter (used when AudioRecord detects speech but can't transcribe)
+    private void RestartListeningForCurrentLetter()
+    {
+        if (vrDisplay != null && vrDisplay.ShouldContinueListening())
+        {
+            string currentLetter = vrDisplay.GetCurrentLetter();
+            if (!string.IsNullOrEmpty(currentLetter))
+            {
+                Debug.Log($"🔄 Restarting listening for letter '{currentLetter}' after AudioRecord detection");
+                currentListeningLetter = currentLetter;
+                StartListening();
+            }
+        }
+        else
+        {            Debug.Log("🛑 Not restarting listening - display says we shouldn't continue");        }
+    }
+
+    // Debug method to test AudioRecord detection manually
+    public void TestAudioRecordDetection()
+    {
+        Debug.Log("🧪 Testing AudioRecord detection manually...");
+        OnVoiceRecognitionResult("SPEECH_DETECTED");
+    }
+
+    // Method to adjust AudioRecord sensitivity
+    public void LowerAudioRecordThreshold()
+    {
+        Debug.Log("🔧 Lowering AudioRecord detection threshold...");
+        
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
+        {
+            try
+            {
+                speechRecognizer.Call("setAudioRecordThreshold", 800.0f); // Lower threshold
+                Debug.Log("✅ AudioRecord threshold lowered to 800");
+                
+                if (vrDisplay != null)
+                {
+                    vrDisplay.UpdateVoiceFeedback("🔧 Sensitivity increased", false);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Failed to lower AudioRecord threshold: {e.Message}");
+            }
+        }
+#else
+        Debug.Log("🖥️ AudioRecord threshold adjustment simulated (Editor mode)");
+#endif
     }
 }

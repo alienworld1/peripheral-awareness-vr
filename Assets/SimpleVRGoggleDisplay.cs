@@ -219,14 +219,49 @@ public class SimpleVRGoggleDisplay : MonoBehaviour
                 Debug.Log("🧪 Testing AudioRecord speech detection...");
                 voiceInput.TestAudioRecordSpeechDetection();
             }
-        }
-        else if (Input.GetKeyDown(KeyCode.G))
+        }        else if (Input.GetKeyDown(KeyCode.G))
         {
             // Test AudioRecord states sequence
             if (voiceInput != null)
             {
                 Debug.Log("🧪 Testing AudioRecord states sequence...");
                 voiceInput.TestAudioRecordStates();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.X))
+        {
+            // Test AudioRecord sensitivity adjustment
+            if (voiceInput != null)
+            {
+                Debug.Log("🔧 Testing AudioRecord sensitivity adjustment...");
+                voiceInput.TestAudioRecordSensitivity();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.Z))
+        {
+            // Simulate AudioRecord detection for current letter
+            if (voiceInput != null)
+            {
+                Debug.Log("🎯 Simulating AudioRecord detection for current letter...");
+                voiceInput.SimulateAudioRecordDetection();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.L))
+        {
+            // Lower AudioRecord threshold for better sensitivity
+            if (voiceInput != null)
+            {
+                Debug.Log("🔧 Lowering AudioRecord threshold...");
+                voiceInput.LowerAudioRecordThreshold();
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.P))
+        {
+            // Test AudioRecord detection manually
+            if (voiceInput != null)
+            {
+                Debug.Log("🧪 Testing AudioRecord detection manually...");
+                voiceInput.TestAudioRecordDetection();
             }
         }
 #endif
